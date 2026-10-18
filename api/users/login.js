@@ -9,14 +9,22 @@ export async function handleLogin(request, supabaseAdmin) {
       });
     }
 
-    // 1. users 테이블에서 이름으로 이메일 조회
+    // 1. users 테이블에서 name 컬럼으로 사용자 프로필 조회 (가장 안전한 단일 조건)
     const { data: userProfile, error: profileError } = await supabaseAdmin
       .from('users')
-      .select('username, name, email')
-      .or(`username.eq.${username},name.eq.${username}`)
+      .select('*')
+      .eq('name', username)
       .maybeSingle();
 
-    if (profileError || !userProfile || !userProfile.email) {
+    if (profileError) {
+      console.error('Profile Fetch Error:', profileError);
+      return new Response(JSON.stringify({ error: '데이터베이스 조회 중 오류가 발생했습니다.' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+      });
+    }
+
+    if (!userProfile || !userProfile.email) {
       return new Response(JSON.stringify({ error: '존재하지 않는 사용자입니다.' }), {
         status: 400,
         headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
@@ -42,6 +50,7 @@ export async function handleLogin(request, supabaseAdmin) {
     });
 
   } catch (err) {
+    console.error('Server Catch Error:', err);
     return new Response(JSON.stringify({ error: err.message || '서버 오류 발생' }), {
       status: 500,
       headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
