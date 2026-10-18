@@ -1,7 +1,6 @@
 export async function handleCreateUser(request, supabaseAdmin) {
   try {
     const body = await request.json();
-    // 프론트엔드에서 전달받은 이름, 비밀번호 등의 정보
     const { username, name, password, role, contract_type, work_location, hire_date, annual_base_date, phone } = body;
 
     if (!password) {
@@ -11,7 +10,6 @@ export async function handleCreateUser(request, supabaseAdmin) {
       });
     }
 
-    // 실제 사람 이름 (username으로 넘어온 값이 있으면 우선 사용, 없으면 name 사용)
     const realUserName = username || name || '이름 없음';
 
     // 1. 기존 users 테이블 수 카운트하여 순차 번호(0, 1, 2...) 생성
@@ -22,12 +20,15 @@ export async function handleCreateUser(request, supabaseAdmin) {
     if (countError) throw countError;
 
     const nextIndex = count !== null ? count : 0;
-    const virtualEmail = `${nextIndex}@jsec.com`; // 예: 1@jsec.com
+    const virtualEmail = `${nextIndex}@jsec.com`; // 예: 12@jsec.com
 
-    // 2. Supabase Auth 계정 생성 (1@jsec.com)
+    // 💡 2. 관리자가 입력한 4자리 비밀번호 뒤에 'jsec'을 붙여서 6자리 이상으로 변환 (Supabase Auth 정책 대응)
+    const securePassword = password.trim() + "jsec";
+
+    // 3. Supabase Auth 계정 생성
     const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
       email: virtualEmail,
-      password: password,
+      password: securePassword, // 변환된 안전한 비밀번호 사용
       email_confirm: true
     });
 
@@ -40,15 +41,14 @@ export async function handleCreateUser(request, supabaseAdmin) {
 
     const userId = authData.user.id; // 생성된 Auth의 UUID
 
-    // 3. users 테이블에 프로필 저장
-    // ★ username과 name에 실제 사람 이름('황치웅')이 그대로 저장됩니다!
+    // 4. users 테이블에 프로필 저장
     const { error: insertError } = await supabaseAdmin
       .from('users')
       .insert([{
-        id: userId,                   // Auth UID 매핑
-        username: realUserName,       // '황치웅'
-        name: realUserName,           // '황치웅'
-        email: virtualEmail,          // '1@jsec.com'
+        id: userId,                      // Auth UID 매핑
+        username: realUserName,          
+        name: realUserName,              
+        email: virtualEmail,             
         role: role || 'user',
         contract_type: contract_type || '정규직',
         work_location: work_location || '지산리조트',
