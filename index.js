@@ -94,6 +94,17 @@ export default {
         return await handleDeleteUser(request, supabaseAdmin);
       }
 
+      // 6. 휴무 관련 라우팅 분기
+      if (url.pathname === '/api/vacations' && request.method === 'GET') {
+        return await handleListVacations(request, supabaseAdmin);
+      }
+      if (url.pathname === '/api/vacations/create' && request.method === 'POST') {
+        return await handleCreateVacation(request, supabaseAdmin);
+      }
+      if (url.pathname.startsWith('/api/vacations/delete/') && request.method === 'DELETE') {
+        return await handleDeleteVacation(request, supabaseAdmin);
+      }
+
       // 6. 404 경로 처리
       return new Response(JSON.stringify({ error: 'Not Found' }), {
         status: 404,
