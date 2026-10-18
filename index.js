@@ -18,23 +18,23 @@ export default {
       });
     }
 
-    // Supabase Admin Client 초기화 (Service Role Key 사용)
     const supabaseAdmin = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
 
-    // 라우팅 분기
+    // 1. 로그인 API 라우팅 (여기 꼭 있어야 합니다!)
     if (url.pathname === '/api/login' && request.method === 'POST') {
       return handleLogin(request, supabaseAdmin);
     }
 
+    // 2. 회원 등록 API 라우팅
     if (url.pathname === '/api/users/create' && request.method === 'POST') {
       return handleCreateUser(request, supabaseAdmin);
     }
 
+    // 3. 회원 목록 조회 API 라우팅
     if (url.pathname === '/api/users/list' && request.method === 'GET') {
       return handleListUsers(request, supabaseAdmin);
     }
 
-    // 기본 404
     return new Response(JSON.stringify({ error: 'Not Found' }), {
       status: 404,
       headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
