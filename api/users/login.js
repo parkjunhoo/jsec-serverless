@@ -18,11 +18,11 @@ export async function handleLogin(request, supabaseAdmin) {
       });
     }
 
-    // 💡 username 이나 email 중 사용자가 무엇을 입력했든 둘 다 매칭해서 찾습니다!
+    // 💡 name, username, email 중 사용자가 무엇을 입력했든 찾을 수 있도록 name.eq 추가!
     const { data: userProfile, error: profileError } = await supabaseAdmin
       .from('users')
-      .select('email, username')
-      .or(`username.eq.${inputVal},email.eq.${inputVal}`)
+      .select('email, username, name')
+      .or(`username.eq.${inputVal},email.eq.${inputVal},name.eq.${inputVal}`)
       .maybeSingle();
 
     if (profileError || !userProfile || !userProfile.email) {
@@ -32,7 +32,7 @@ export async function handleLogin(request, supabaseAdmin) {
       });
     }
 
-    // Supabase Auth 로그인 처리
+    // Supabase Auth 로그인 처리 (찾아낸 userProfile.email 사용)
     const { data: authData, error: authError } = await supabaseAdmin.auth.signInWithPassword({
       email: userProfile.email,
       password: password
