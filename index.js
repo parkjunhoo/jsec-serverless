@@ -2,7 +2,6 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
-    // CORS 설정 (웹뷰 앱이나 웹페이지에서 호출할 때 에러 안 나게 허용)
     const corsHeaders = {
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
@@ -13,24 +12,24 @@ export default {
       return new Response(null, { headers: corsHeaders });
     }
 
-    // 1. 서버 정상 작동 확인용 (핑)
+    // 서버 상태 확인
     if (url.pathname === "/") {
       return new Response(JSON.stringify({ message: "JSEC Serverless API Running OK!" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json; charset=utf-8" },
       });
     }
 
-    // 2. 직원 차량 조회 API (예시: /api/vehicles?carNumber=1234)
+    // 직원 차량 조회 API (/api/vehicles?keyword=검색어)
     if (url.pathname === "/api/vehicles" && request.method === "GET") {
-      const carNumber = url.searchParams.get("carNumber") || "";
+      const keyword = url.searchParams.get("keyword") || "";
 
-      // Supabase REST API 호출
-      const supabaseUrl = env.SUPABASE_URL || 'https://nihsmjfcriqeuflujrrh.supabase.co';
-      const supabaseKey = env.SUPABASE_ANON_KEY || 'sb_publishable_hM0gN_gaG4d86oT9k-laRg_KOmfqrn8';
+      const supabaseUrl = 'https://nihsmjfcriqeuflujrrh.supabase.co';
+      const supabaseKey = 'sb_publishable_hM0gN_gaG4d86oT9k-laRg_KOmfqrn8';
 
       try {
-        // Supabase의 'vehicles' 테이블에서 차량번호 검색
-        const queryUrl = `${supabaseUrl}/rest/v1/vehicles?car_number=ilike.%${carNumber}%`;
+        // skicar_data 테이블에서 number, full_number, 혹은 name에 검색어가 포함된 데이터 조회
+        const queryUrl = `${supabaseUrl}/rest/v1/skicar_data?or=(number.ilike.%${keyword}%,full_number.ilike.%${keyword}%,name.ilike.%${keyword}%)`;
+        
         const sbResponse = await fetch(queryUrl, {
           method: "GET",
           headers: {
@@ -53,7 +52,6 @@ export default {
       }
     }
 
-    // 404 처리
     return new Response(JSON.stringify({ error: "Not Found" }), {
       status: 404,
       headers: { ...corsHeaders, "Content-Type": "application/json; charset=utf-8" },
