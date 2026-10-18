@@ -16,7 +16,7 @@ export async function handleLogin(request, supabaseAdmin) {
       });
     }
 
-    // 1. users 테이블에서 username(예: 박준후)으로 이메일 조회
+// 1. users 테이블에서 username으로 조회
     const { data: userProfile, error: profileError } = await supabaseAdmin
       .from('users')
       .select('email')
@@ -24,7 +24,8 @@ export async function handleLogin(request, supabaseAdmin) {
       .maybeSingle();
 
     if (profileError || !userProfile || !userProfile.email) {
-      return new Response(JSON.stringify({ error: '존재하지 않는 사용자입니다.' }), {
+      // 💡 어떤 아이디로 조회를 시도했는지 응답에 담아봅니다!
+      return new Response(JSON.stringify({ error: `사용자 없음 (입력된 값: "${username}", 에러: ${profileError ? profileError.message : '데이터 없음'})` }), {
         status: 400,
         headers: corsHeaders
       });
