@@ -10,10 +10,10 @@ export default {
     // 공통 CORS 헤더
     const corsHeaders = {
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS', // 👈 여기에 DELETE 반드시 추가!
       'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     };
-
+    
     // 1. 브라우저 OPTIONS Preflight 요청 처리
     if (request.method === 'OPTIONS') {
       return new Response(null, {
