@@ -1,7 +1,8 @@
 export async function handleCreateUser(request, supabaseAdmin) {
   try {
     const body = await request.json();
-    const { name, password, role, contract_type, work_location, hire_date, annual_base_date, phone } = body;
+    // 프론트엔드에서 전달받은 이름, 비밀번호 등의 정보
+    const { username, name, password, role, contract_type, work_location, hire_date, annual_base_date, phone } = body;
 
     if (!password) {
       return new Response(JSON.stringify({ error: '비밀번호는 필수 입력 항목입니다.' }), {
@@ -10,20 +11,20 @@ export async function handleCreateUser(request, supabaseAdmin) {
       });
     }
 
-    // 1. 기존 users 테이블에서 데이터 개수나 가장 큰 순번을 확인하여 다음 순번 결정
-    // 예: 현재 등록된 유저 수를 세서 다음 인덱스로 활용 (또는 고유 번호 부여)
+    // 실제 사람 이름 (username으로 넘어온 값이 있으면 우선 사용, 없으면 name 사용)
+    const realUserName = username || name || '이름 없음';
+
+    // 1. 기존 users 테이블 수 카운트하여 순차 번호(0, 1, 2...) 생성
     const { count, error: countError } = await supabaseAdmin
       .from('users')
       .select('*', { count: 'exact', head: true });
 
     if (countError) throw countError;
 
-    // 순차 번호 부여 (0부터 시작: 0, 1, 2, 3...)
     const nextIndex = count !== null ? count : 0;
-    const virtualEmail = `${nextIndex}@jsec.com`;
-    const usernameString = `${nextIndex}`; // username을 '0', '1' 형태로 관리할 경우
+    const virtualEmail = `${nextIndex}@jsec.com`; // 예: 1@jsec.com
 
-    // 2. Supabase Auth 계정 생성 (0@jsec.com, 1@jsec.com ...)
+    // 2. Supabase Auth 계정 생성 (1@jsec.com)
     const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
       email: virtualEmail,
       password: password,
@@ -37,16 +38,17 @@ export async function handleCreateUser(request, supabaseAdmin) {
       });
     }
 
-    const userId = authData.user.id;
+    const userId = authData.user.id; // 생성된 Auth의 UUID
 
-    // 3. users 테이블에 프로필 정보 삽입 (Auth의 UUID와 매핑)
+    // 3. users 테이블에 프로필 저장
+    // ★ username과 name에 실제 사람 이름('황치웅')이 그대로 저장됩니다!
     const { error: insertError } = await supabaseAdmin
       .from('users')
       .insert([{
-        id: userId,
-        username: usernameString, // '0', '1', '2' 등 순차 ID
-        name: name || `사용자${nextIndex}`, // 실제 성함 (예: 홍길동)
-        email: virtualEmail,
+        id: userId,                   // Auth UID 매핑
+        username: realUserName,       // '황치웅'
+        name: realUserName,           // '황치웅'
+        email: virtualEmail,          // '1@jsec.com'
         role: role || 'user',
         contract_type: contract_type || '정규직',
         work_location: work_location || '지산리조트',
