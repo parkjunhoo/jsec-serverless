@@ -1,7 +1,3 @@
 name = "jsec-serverless"
 main = "index.js"
 compatibility_date = "2026-01-01"
-
-[vars]
-SUPABASE_URL = "https://nihsmjfcriqeuflujrrh.supabase.co"
-SUPABASE_SERVICE_ROLE_KEY = "sb_publishable_hM0gN_gaG4d86oT9k-laRg_KOmfqrn8"
