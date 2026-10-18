@@ -9,11 +9,11 @@ export async function handleLogin(request, supabaseAdmin) {
       });
     }
 
-    // 1. users 테이블에서 name 컬럼으로 사용자 프로필 조회 (가장 안전한 단일 조건)
+// 1. users 테이블에서 username(아이디) 컬럼으로 사용자 프로필 조회
     const { data: userProfile, error: profileError } = await supabaseAdmin
       .from('users')
       .select('*')
-      .eq('name', username)
+      .eq('username', username) // 'name'을 'username'으로 변경!
       .maybeSingle();
 
     if (profileError) {
