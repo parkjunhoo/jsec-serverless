@@ -7,31 +7,32 @@ export async function handleLogin(request, supabaseAdmin) {
   };
 
   try {
-    const { username, password } = await request.json();
+    const body = await request.json();
+    const inputVal = body.username ? body.username.trim() : '';
+    const password = body.password;
 
-    if (!username || !password) {
-      return new Response(JSON.stringify({ error: '이름과 비밀번호를 모두 입력해 주세요.' }), {
+    if (!inputVal || !password) {
+      return new Response(JSON.stringify({ error: '아이디(이름)와 비밀번호를 모두 입력해 주세요.' }), {
         status: 400,
         headers: corsHeaders
       });
     }
 
-// 1. users 테이블에서 username으로 조회
+    // 💡 username 이나 email 중 사용자가 무엇을 입력했든 둘 다 매칭해서 찾습니다!
     const { data: userProfile, error: profileError } = await supabaseAdmin
       .from('users')
-      .select('email')
-      .eq('username', username)
+      .select('email, username')
+      .or(`username.eq.${inputVal},email.eq.${inputVal}`)
       .maybeSingle();
 
     if (profileError || !userProfile || !userProfile.email) {
-      // 💡 어떤 아이디로 조회를 시도했는지 응답에 담아봅니다!
-      return new Response(JSON.stringify({ error: `사용자 없음 (입력된 값: "${username}", 에러: ${profileError ? profileError.message : '데이터 없음'})` }), {
+      return new Response(JSON.stringify({ error: `사용자를 찾을 수 없습니다. (입력값: "${inputVal}")` }), {
         status: 400,
         headers: corsHeaders
       });
     }
 
-    // 2. 조회된 진짜 이메일(0@jsec.com)과 입력받은 비밀번호로 Supabase Auth 로그인
+    // Supabase Auth 로그인 처리
     const { data: authData, error: authError } = await supabaseAdmin.auth.signInWithPassword({
       email: userProfile.email,
       password: password
@@ -50,7 +51,7 @@ export async function handleLogin(request, supabaseAdmin) {
     });
 
   } catch (err) {
-    return new Response(JSON.stringify({ error: `서버 오류: ${err.message}` }), {
+    return new Response(JSON.stringify({ error: `서버 내부 오류: ${err.message}` }), {
       status: 500,
       headers: corsHeaders
     });
