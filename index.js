@@ -3,6 +3,7 @@ import { handleLogin } from './api/users/login.js';
 import { handleCreateUser } from './api/users/create.js';
 import { handleDeleteUser } from './api/users/delete.js';
 import { handleListUsers } from './api/users/list.js';
+import { handleUpdateUser } from './api/users/update.js';
 import {
   handleCreateVacation,
   handleDeleteVacation,
@@ -79,6 +80,11 @@ export default {
       // 5. 회원 삭제 라우팅 (경로가 /api/users/delete/ 로 시작하고 DELETE 요청인 경우)
       if (url.pathname.startsWith('/api/users/delete/') && request.method === 'DELETE') {
         return await handleDeleteUser(request, supabaseAdmin);
+      }
+
+      if (url.pathname.startsWith('/api/users/') && request.method === 'PATCH') {
+        const userId = url.pathname.slice('/api/users/'.length);
+        return await handleUpdateUser(request, supabaseAdmin, userId);
       }
 
       if (url.pathname === '/api/push/register' && request.method === 'POST') {
