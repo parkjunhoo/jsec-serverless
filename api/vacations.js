@@ -46,6 +46,14 @@ async function getVacationForAuthorizedUser(request, supabaseAdmin, vacationId) 
   return { ...auth, vacation };
 }
 
+function getHoursUsed(leaveType, timeDetail, value) {
+  if (leaveType !== '시간차') return null;
+  if (timeDetail === '오전반차' || timeDetail === '오후반차') return 4;
+  const hours = Number(value);
+  if (!Number.isFinite(hours) || hours < 0.25 || hours > 24) return undefined;
+  return Math.round(hours * 100) / 100;
+}
+
 export async function handleCreateVacation(request, supabaseAdmin, env, context) {
   try {
     const auth = await authenticateRequest(request, supabaseAdmin);
@@ -61,6 +69,16 @@ export async function handleCreateVacation(request, supabaseAdmin, env, context)
     if (!['종일', '오전반차', '오후반차', '시간지정'].includes(timeDetail)) {
       return jsonResponse({ error: '세부 시간이 올바르지 않습니다.' }, 400);
     }
+    if (leaveType !== '시간차' && timeDetail !== '종일') {
+      return jsonResponse({ error: '시간차 이외의 휴무는 종일로 등록해 주세요.' }, 400);
+    }
+    if (leaveType === '시간차' && !['오전반차', '오후반차', '시간지정'].includes(timeDetail)) {
+      return jsonResponse({ error: '시간차는 오전반차, 오후반차 또는 N시간 사용으로 등록해 주세요.' }, 400);
+    }
+    const hoursUsed = getHoursUsed(leaveType, timeDetail, body.hours_used);
+    if (leaveType === '시간차' && hoursUsed === undefined) {
+      return jsonResponse({ error: '시간차 사용 시간을 0.25~24시간 사이로 입력해 주세요.' }, 400);
+    }
 
     const userId = auth.profile.role === 'admin' && body.user_id
       ? body.user_id
@@ -74,6 +92,7 @@ export async function handleCreateVacation(request, supabaseAdmin, env, context)
       date,
       leave_type: leaveType,
       time_detail: timeDetail,
+      hours_used: hoursUsed,
       memo: typeof body.memo === 'string' ? body.memo.trim() : ''
     };
     const { data, error } = await supabaseAdmin
@@ -111,11 +130,22 @@ export async function handleUpdateVacation(request, supabaseAdmin, env, context,
     if (!['종일', '오전반차', '오후반차', '시간지정'].includes(timeDetail)) {
       return jsonResponse({ error: '세부 시간이 올바르지 않습니다.' }, 400);
     }
+    if (leaveType !== '시간차' && timeDetail !== '종일') {
+      return jsonResponse({ error: '시간차 이외의 휴무는 종일로 등록해 주세요.' }, 400);
+    }
+    if (leaveType === '시간차' && !['오전반차', '오후반차', '시간지정'].includes(timeDetail)) {
+      return jsonResponse({ error: '시간차는 오전반차, 오후반차 또는 N시간 사용으로 등록해 주세요.' }, 400);
+    }
+    const hoursUsed = getHoursUsed(leaveType, timeDetail, body.hours_used);
+    if (leaveType === '시간차' && hoursUsed === undefined) {
+      return jsonResponse({ error: '시간차 사용 시간을 0.25~24시간 사이로 입력해 주세요.' }, 400);
+    }
 
     const update = {
       date,
       leave_type: leaveType,
       time_detail: timeDetail,
+      hours_used: hoursUsed,
       memo: typeof body.memo === 'string' ? body.memo.trim() : ''
     };
 
