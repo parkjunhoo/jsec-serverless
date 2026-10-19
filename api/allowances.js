@@ -98,8 +98,6 @@ export async function handleListAllowances(request, supabaseAdmin) {
     if (auth.profile.role === 'admin') {
       const userId = url.searchParams.get('user_id');
       if (userId) query = query.eq('user_id', userId);
-    } else {
-      query = query.eq('user_id', auth.user.id);
     }
 
     const { data, error } = await query;
