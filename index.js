@@ -2,6 +2,16 @@ import { createClient } from '@supabase/supabase-js';
 import { handleLogin } from './api/users/login.js';
 import { handleCreateUser } from './api/users/create.js';
 import { handleListUsers } from './api/users/list.js';
+import {
+  handleCreateVacation,
+  handleDeleteVacation,
+  handleListVacations,
+  handleUpdateVacation
+} from './api/vacations.js';
+import {
+  handleBroadcastPush,
+  handleRegisterPushToken
+} from './api/push.js';
 
 // 1. 회원 삭제 핸들러 함수 직접 포함 (또는 별도 파일에서 import 하셔도 됩니다)
 async function handleDeleteUser(request, supabaseAdmin) {
@@ -54,7 +64,7 @@ export default {
     // 공통 CORS 헤더 (DELETE 허용 포함)
     const corsHeaders = {
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+      'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     };
     
@@ -94,18 +104,30 @@ export default {
         return await handleDeleteUser(request, supabaseAdmin);
       }
 
-      // 6. 휴무 관련 라우팅 분기
+      if (url.pathname === '/api/push/register' && request.method === 'POST') {
+        return await handleRegisterPushToken(request, supabaseAdmin);
+      }
+      if (url.pathname === '/api/push/broadcast' && request.method === 'POST') {
+        return await handleBroadcastPush(request, supabaseAdmin, env);
+      }
+
+      // 7. 휴무 관련 라우팅 분기
       if (url.pathname === '/api/vacations' && request.method === 'GET') {
         return await handleListVacations(request, supabaseAdmin);
       }
       if (url.pathname === '/api/vacations/create' && request.method === 'POST') {
-        return await handleCreateVacation(request, supabaseAdmin);
+        return await handleCreateVacation(request, supabaseAdmin, env, ctx);
       }
       if (url.pathname.startsWith('/api/vacations/delete/') && request.method === 'DELETE') {
-        return await handleDeleteVacation(request, supabaseAdmin);
+        const vacationId = url.pathname.slice('/api/vacations/delete/'.length);
+        return await handleDeleteVacation(request, supabaseAdmin, env, ctx, vacationId);
+      }
+      if (url.pathname.startsWith('/api/vacations/') && request.method === 'PATCH') {
+        const vacationId = url.pathname.slice('/api/vacations/'.length);
+        return await handleUpdateVacation(request, supabaseAdmin, env, ctx, vacationId);
       }
 
-      // 6. 404 경로 처리
+      // 8. 404 경로 처리
       return new Response(JSON.stringify({ error: 'Not Found' }), {
         status: 404,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
