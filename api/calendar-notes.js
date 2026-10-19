@@ -54,8 +54,8 @@ export async function handleSaveCalendarNote(request, supabaseAdmin) {
     if (!emoji || [...emoji].length > 8) {
       return jsonResponse({ error: '이모지를 선택해 주세요.' }, 400);
     }
-    if (!content || content.length > 500) {
-      return jsonResponse({ error: '메모는 1~500자 사이로 입력해 주세요.' }, 400);
+    if (content.length > 500) {
+      return jsonResponse({ error: '메모는 500자 이내로 입력해 주세요.' }, 400);
     }
 
     const { data, error } = await supabaseAdmin
