@@ -129,7 +129,12 @@ export async function handleListAllowanceAvailability(request, supabaseAdmin) {
       .gte('work_date', start)
       .lte('work_date', end);
     if (error) throw error;
-    return jsonResponse(data || []);
+    const availability = data || [];
+    return jsonResponse(auth.profile.role === 'admin'
+      ? availability
+      : availability.map(({ work_date, type_code, shift, slot_no }) => ({
+        work_date, type_code, shift, slot_no
+      })));
   } catch (error) {
     console.error('수당 슬롯 조회 오류:', error);
     return jsonResponse({ error: error.message }, 500);
