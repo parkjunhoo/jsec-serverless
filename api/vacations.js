@@ -85,7 +85,7 @@ export async function handleCreateVacation(request, supabaseAdmin, env, context)
 
     schedulePush(context, supabaseAdmin, env, {
       title: '휴무 일정 등록',
-      body: `${vacation.username} 님의 ${date} ${leaveType} 일정이 등록되었습니다.`,
+      body: `${vacation.username} 님이 ${date} ${leaveType} 휴무를 추가했습니다.`,
       type: 'vacation_create'
     });
     return jsonResponse({ success: true, vacation: data });
@@ -137,7 +137,7 @@ export async function handleUpdateVacation(request, supabaseAdmin, env, context,
 
     schedulePush(context, supabaseAdmin, env, {
       title: '휴무 일정 수정',
-      body: `${data.username} 님의 ${date} ${leaveType} 일정이 수정되었습니다.`,
+      body: `${data.username} 님의 ${authorized.vacation.date} ${authorized.vacation.leave_type} 휴무를 ${date} ${leaveType}로 변경했습니다.`,
       type: 'vacation_update'
     });
     return jsonResponse({ success: true, vacation: data });
@@ -161,7 +161,7 @@ export async function handleDeleteVacation(request, supabaseAdmin, env, context,
 
     schedulePush(context, supabaseAdmin, env, {
       title: '휴무 일정 삭제',
-      body: `${authorized.vacation.username} 님의 ${authorized.vacation.date} 일정이 삭제되었습니다.`,
+      body: `${authorized.vacation.username} 님의 ${authorized.vacation.date} ${authorized.vacation.leave_type} 휴무를 삭제했습니다.`,
       type: 'vacation_delete'
     });
     return jsonResponse({ success: true, message: '휴무가 삭제되었습니다.' });
