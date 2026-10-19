@@ -10,7 +10,11 @@ import {
 } from './api/vacations.js';
 import {
   handleBroadcastPush,
+  handleDeleteNotification,
   handleGetPushPreference,
+  handleListNotifications,
+  handleMarkAllNotificationsRead,
+  handleMarkNotificationRead,
   handleRegisterPushToken,
   handleSetPushPreference
 } from './api/push.js';
@@ -117,6 +121,20 @@ export default {
       }
       if (url.pathname === '/api/push/broadcast' && request.method === 'POST') {
         return await handleBroadcastPush(request, supabaseAdmin, env);
+      }
+      if (url.pathname === '/api/notifications' && request.method === 'GET') {
+        return await handleListNotifications(request, supabaseAdmin);
+      }
+      if (url.pathname === '/api/notifications/read-all' && request.method === 'PUT') {
+        return await handleMarkAllNotificationsRead(request, supabaseAdmin);
+      }
+      if (url.pathname.startsWith('/api/notifications/') && request.method === 'PUT') {
+        const notificationId = url.pathname.slice('/api/notifications/'.length);
+        return await handleMarkNotificationRead(request, supabaseAdmin, notificationId);
+      }
+      if (url.pathname.startsWith('/api/notifications/') && request.method === 'DELETE') {
+        const notificationId = url.pathname.slice('/api/notifications/'.length);
+        return await handleDeleteNotification(request, supabaseAdmin, notificationId);
       }
 
       // 7. 휴무 관련 라우팅 분기

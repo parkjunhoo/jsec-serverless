@@ -96,25 +96,48 @@ export async function sendPushToAll(supabaseAdmin, env, notification) {
     throw new Error('FCM 서비스 계정 JSON에 필수 항목이 없습니다.');
   }
 
+  const userIds = [];
+  for (let offset = 0; ; offset += 1000) {
+    const { data, error } = await supabaseAdmin
+      .from('users')
+      .select('id')
+      .range(offset, offset + 999);
+    if (error) throw error;
+    userIds.push(...(data || []).map(user => user.id));
+    if (!data || data.length < 1000) break;
+  }
+
+  for (let offset = 0; offset < userIds.length; offset += 500) {
+    const { error } = await supabaseAdmin
+      .from('notifications')
+      .insert(userIds.slice(offset, offset + 500).map(userId => ({
+        user_id: userId,
+        title: notification.title,
+        body: notification.body,
+        type: notification.type
+      })));
+    if (error) throw error;
+  }
+
   const registrations = [];
   for (let offset = 0; ; offset += 1000) {
     const { data, error } = await supabaseAdmin
       .from('push_tokens')
-      .select('token')
-      .eq('enabled', true)
+      .select('token, user_id, enabled')
       .range(offset, offset + 999);
     if (error) throw error;
     registrations.push(...(data || []));
     if (!data || data.length < 1000) break;
   }
-  if (registrations.length === 0) return { sent: 0, failed: 0 };
+  const enabledRegistrations = registrations.filter(registration => registration.enabled);
+  if (enabledRegistrations.length === 0) return { sent: 0, failed: 0 };
 
   const accessToken = await getFcmAccessToken(serviceAccount);
   let sent = 0;
   let failed = 0;
 
-  for (let offset = 0; offset < registrations.length; offset += 25) {
-    const batch = registrations.slice(offset, offset + 25);
+  for (let offset = 0; offset < enabledRegistrations.length; offset += 25) {
+    const batch = enabledRegistrations.slice(offset, offset + 25);
     const results = await Promise.all(batch.map(async ({ token }) => {
       const response = await fetch(
         `https://fcm.googleapis.com/v1/projects/${encodeURIComponent(serviceAccount.project_id)}/messages:send`,
@@ -268,6 +291,86 @@ export async function handleSetPushPreference(request, supabaseAdmin) {
   }
 
   return jsonResponse({ success: true, enabled: data.enabled });
+}
+
+export async function handleListNotifications(request, supabaseAdmin) {
+  const auth = await authenticateRequest(request, supabaseAdmin);
+  if (auth.error) return auth.error;
+
+  const { data: notifications, error } = await supabaseAdmin
+    .from('notifications')
+    .select('id, title, body, type, created_at, read_at')
+    .eq('user_id', auth.user.id)
+    .order('created_at', { ascending: false })
+    .limit(100);
+  if (error) throw error;
+
+  const { count, error: countError } = await supabaseAdmin
+    .from('notifications')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', auth.user.id)
+    .is('read_at', null);
+  if (countError) throw countError;
+
+  return jsonResponse({ notifications, unreadCount: count || 0 });
+}
+
+export async function handleMarkNotificationRead(request, supabaseAdmin, notificationId) {
+  const auth = await authenticateRequest(request, supabaseAdmin);
+  if (auth.error) return auth.error;
+
+  const { data, error } = await supabaseAdmin
+    .from('notifications')
+    .update({ read_at: new Date().toISOString() })
+    .eq('id', notificationId)
+    .eq('user_id', auth.user.id)
+    .is('read_at', null)
+    .select('id')
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) {
+    const { data: existing, error: lookupError } = await supabaseAdmin
+      .from('notifications')
+      .select('id')
+      .eq('id', notificationId)
+      .eq('user_id', auth.user.id)
+      .maybeSingle();
+    if (lookupError) throw lookupError;
+    if (!existing) return jsonResponse({ error: '알림을 찾을 수 없습니다.' }, 404);
+  }
+
+  return jsonResponse({ success: true });
+}
+
+export async function handleMarkAllNotificationsRead(request, supabaseAdmin) {
+  const auth = await authenticateRequest(request, supabaseAdmin);
+  if (auth.error) return auth.error;
+
+  const { error } = await supabaseAdmin
+    .from('notifications')
+    .update({ read_at: new Date().toISOString() })
+    .eq('user_id', auth.user.id)
+    .is('read_at', null);
+  if (error) throw error;
+
+  return jsonResponse({ success: true });
+}
+
+export async function handleDeleteNotification(request, supabaseAdmin, notificationId) {
+  const auth = await authenticateRequest(request, supabaseAdmin);
+  if (auth.error) return auth.error;
+
+  const { data, error } = await supabaseAdmin
+    .from('notifications')
+    .delete()
+    .eq('id', notificationId)
+    .eq('user_id', auth.user.id)
+    .select('id')
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return jsonResponse({ error: '알림을 찾을 수 없습니다.' }, 404);
+
+  return jsonResponse({ success: true });
 }
 
 export async function handleBroadcastPush(request, supabaseAdmin, env) {
