@@ -51,11 +51,14 @@ export async function handleSaveCalendarNote(request, supabaseAdmin) {
     const emoji = typeof body.emoji === 'string' ? body.emoji.trim() : '';
     const content = typeof body.content === 'string' ? body.content.trim() : '';
     if (!isValidDate(date)) return jsonResponse({ error: '메모 날짜가 올바르지 않습니다.' }, 400);
-    if (!emoji || [...emoji].length > 8) {
-      return jsonResponse({ error: '이모지를 선택해 주세요.' }, 400);
+    if ([...emoji].length > 8) {
+      return jsonResponse({ error: '이모지는 8자 이내로 입력해 주세요.' }, 400);
     }
     if (content.length > 500) {
       return jsonResponse({ error: '메모는 500자 이내로 입력해 주세요.' }, 400);
+    }
+    if (!emoji && !content) {
+      return jsonResponse({ error: '메모 내용 또는 이모지를 입력해 주세요.' }, 400);
     }
 
     const { data, error } = await supabaseAdmin

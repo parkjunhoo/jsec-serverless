@@ -15,6 +15,7 @@ import {
 } from './api/calendar-notes.js';
 import {
   handleBroadcastPush,
+  handleDeleteAllNotifications,
   handleDeleteNotification,
   handleGetPushPreference,
   handleListNotifications,
@@ -129,6 +130,9 @@ export default {
       }
       if (url.pathname === '/api/notifications' && request.method === 'GET') {
         return await handleListNotifications(request, supabaseAdmin);
+      }
+      if (url.pathname === '/api/notifications' && request.method === 'DELETE') {
+        return await handleDeleteAllNotifications(request, supabaseAdmin);
       }
       if (url.pathname === '/api/notifications/read-all' && request.method === 'PUT') {
         return await handleMarkAllNotificationsRead(request, supabaseAdmin);

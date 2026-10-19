@@ -373,6 +373,19 @@ export async function handleDeleteNotification(request, supabaseAdmin, notificat
   return jsonResponse({ success: true });
 }
 
+export async function handleDeleteAllNotifications(request, supabaseAdmin) {
+  const auth = await authenticateRequest(request, supabaseAdmin);
+  if (auth.error) return auth.error;
+
+  const { error } = await supabaseAdmin
+    .from('notifications')
+    .delete()
+    .eq('user_id', auth.user.id);
+  if (error) throw error;
+
+  return jsonResponse({ success: true });
+}
+
 export async function handleBroadcastPush(request, supabaseAdmin, env) {
   const auth = await authenticateRequest(request, supabaseAdmin);
   if (auth.error) return auth.error;
