@@ -16,6 +16,7 @@ import {
 import {
   handleCreateAllowance,
   handleDeleteAllowance,
+  handleListAllowanceAvailability,
   handleListAllowanceTypes,
   handleListAllowances,
   handleUpdateAllowance
@@ -171,6 +172,9 @@ export default {
 
       if (url.pathname === '/api/allowances/types' && request.method === 'GET') {
         return await handleListAllowanceTypes(request, supabaseAdmin);
+      }
+      if (url.pathname === '/api/allowances/availability' && request.method === 'GET') {
+        return await handleListAllowanceAvailability(request, supabaseAdmin);
       }
       if (url.pathname === '/api/allowances' && request.method === 'GET') {
         return await handleListAllowances(request, supabaseAdmin);
