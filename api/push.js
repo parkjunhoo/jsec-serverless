@@ -101,6 +101,7 @@ export async function sendPushToAll(supabaseAdmin, env, notification) {
     const { data, error } = await supabaseAdmin
       .from('push_tokens')
       .select('token')
+      .eq('enabled', true)
       .range(offset, offset + 999);
     if (error) throw error;
     registrations.push(...(data || []));
@@ -200,17 +201,73 @@ export async function handleRegisterPushToken(request, supabaseAdmin) {
     return jsonResponse({ error: '유효한 FCM 토큰이 필요합니다.' }, 400);
   }
 
+  const { data: existingToken, error: lookupError } = await supabaseAdmin
+    .from('push_tokens')
+    .select('enabled')
+    .eq('token', token)
+    .eq('user_id', auth.user.id)
+    .maybeSingle();
+  if (lookupError) throw lookupError;
+
   const { error } = await supabaseAdmin
     .from('push_tokens')
     .upsert({
       token,
       user_id: auth.user.id,
       platform: 'android',
+      enabled: existingToken ? existingToken.enabled : true,
       updated_at: new Date().toISOString()
     }, { onConflict: 'token' });
   if (error) throw error;
 
   return jsonResponse({ success: true });
+}
+
+export async function handleGetPushPreference(request, supabaseAdmin) {
+  const auth = await authenticateRequest(request, supabaseAdmin);
+  if (auth.error) return auth.error;
+
+  const token = new URL(request.url).searchParams.get('token') || '';
+  if (!token || token.length > 4096) {
+    return jsonResponse({ error: '유효한 FCM 토큰이 필요합니다.' }, 400);
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from('push_tokens')
+    .select('enabled')
+    .eq('token', token)
+    .eq('user_id', auth.user.id)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) {
+    return jsonResponse({ error: '이 기기의 푸시 토큰이 아직 등록되지 않았습니다. 앱을 다시 실행해 주세요.' }, 404);
+  }
+  return jsonResponse({ enabled: data.enabled });
+}
+
+export async function handleSetPushPreference(request, supabaseAdmin) {
+  const auth = await authenticateRequest(request, supabaseAdmin);
+  if (auth.error) return auth.error;
+
+  const body = await request.json();
+  const token = typeof body.token === 'string' ? body.token.trim() : '';
+  if (!token || token.length > 4096 || typeof body.enabled !== 'boolean') {
+    return jsonResponse({ error: 'FCM 토큰 또는 알림 설정이 올바르지 않습니다.' }, 400);
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from('push_tokens')
+    .update({ enabled: body.enabled, updated_at: new Date().toISOString() })
+    .eq('token', token)
+    .eq('user_id', auth.user.id)
+    .select('enabled')
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) {
+    return jsonResponse({ error: '이 기기의 푸시 토큰이 아직 등록되지 않았습니다. 앱을 다시 실행해 주세요.' }, 404);
+  }
+
+  return jsonResponse({ success: true, enabled: data.enabled });
 }
 
 export async function handleBroadcastPush(request, supabaseAdmin, env) {

@@ -10,7 +10,9 @@ import {
 } from './api/vacations.js';
 import {
   handleBroadcastPush,
-  handleRegisterPushToken
+  handleGetPushPreference,
+  handleRegisterPushToken,
+  handleSetPushPreference
 } from './api/push.js';
 
 // 1. 회원 삭제 핸들러 함수 직접 포함 (또는 별도 파일에서 import 하셔도 됩니다)
@@ -106,6 +108,12 @@ export default {
 
       if (url.pathname === '/api/push/register' && request.method === 'POST') {
         return await handleRegisterPushToken(request, supabaseAdmin);
+      }
+      if (url.pathname === '/api/push/preference' && request.method === 'GET') {
+        return await handleGetPushPreference(request, supabaseAdmin);
+      }
+      if (url.pathname === '/api/push/preference' && request.method === 'PUT') {
+        return await handleSetPushPreference(request, supabaseAdmin);
       }
       if (url.pathname === '/api/push/broadcast' && request.method === 'POST') {
         return await handleBroadcastPush(request, supabaseAdmin, env);
