@@ -54,7 +54,7 @@ export async function handleCreateUser(request, supabaseAdmin) {
         work_location: work_location || '지산리조트',
         hire_date: hire_date || null,
         annual_base_date: annual_base_date || null,
-        phone: phone || null,
+        phone: phone || '',
         status: '재직'
       }]);
 
