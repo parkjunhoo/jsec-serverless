@@ -9,6 +9,11 @@ import {
   handleUpdateVacation
 } from './api/vacations.js';
 import {
+  handleDeleteCalendarNote,
+  handleListCalendarNotes,
+  handleSaveCalendarNote
+} from './api/calendar-notes.js';
+import {
   handleBroadcastPush,
   handleDeleteNotification,
   handleGetPushPreference,
@@ -151,6 +156,17 @@ export default {
       if (url.pathname.startsWith('/api/vacations/') && request.method === 'PATCH') {
         const vacationId = url.pathname.slice('/api/vacations/'.length);
         return await handleUpdateVacation(request, supabaseAdmin, env, ctx, vacationId);
+      }
+
+      if (url.pathname === '/api/calendar-notes' && request.method === 'GET') {
+        return await handleListCalendarNotes(request, supabaseAdmin);
+      }
+      if (url.pathname === '/api/calendar-notes' && request.method === 'PUT') {
+        return await handleSaveCalendarNote(request, supabaseAdmin);
+      }
+      if (url.pathname.startsWith('/api/calendar-notes/') && request.method === 'DELETE') {
+        const date = url.pathname.slice('/api/calendar-notes/'.length);
+        return await handleDeleteCalendarNote(request, supabaseAdmin, date);
       }
 
       // 8. 404 경로 처리
