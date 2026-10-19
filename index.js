@@ -14,6 +14,13 @@ import {
   handleSaveCalendarNote
 } from './api/calendar-notes.js';
 import {
+  handleCreateAllowance,
+  handleDeleteAllowance,
+  handleListAllowanceTypes,
+  handleListAllowances,
+  handleUpdateAllowance
+} from './api/allowances.js';
+import {
   handleBroadcastPush,
   handleDeleteAllNotifications,
   handleDeleteNotification,
@@ -160,6 +167,24 @@ export default {
       if (url.pathname.startsWith('/api/vacations/') && request.method === 'PATCH') {
         const vacationId = url.pathname.slice('/api/vacations/'.length);
         return await handleUpdateVacation(request, supabaseAdmin, env, ctx, vacationId);
+      }
+
+      if (url.pathname === '/api/allowances/types' && request.method === 'GET') {
+        return await handleListAllowanceTypes(request, supabaseAdmin);
+      }
+      if (url.pathname === '/api/allowances' && request.method === 'GET') {
+        return await handleListAllowances(request, supabaseAdmin);
+      }
+      if (url.pathname === '/api/allowances' && request.method === 'POST') {
+        return await handleCreateAllowance(request, supabaseAdmin);
+      }
+      if (url.pathname.startsWith('/api/allowances/') && request.method === 'PATCH') {
+        const entryId = url.pathname.slice('/api/allowances/'.length);
+        return await handleUpdateAllowance(request, supabaseAdmin, entryId);
+      }
+      if (url.pathname.startsWith('/api/allowances/') && request.method === 'DELETE') {
+        const entryId = url.pathname.slice('/api/allowances/'.length);
+        return await handleDeleteAllowance(request, supabaseAdmin, entryId);
       }
 
       if (url.pathname === '/api/calendar-notes' && request.method === 'GET') {
