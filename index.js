@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { handleLogin } from './api/users/login.js';
 import { handleCreateUser } from './api/users/create.js';
+import { handleDeleteUser } from './api/users/delete.js';
 import { handleListUsers } from './api/users/list.js';
 import {
   handleCreateVacation,
@@ -32,50 +33,6 @@ import {
   handleRegisterPushToken,
   handleSetPushPreference
 } from './api/push.js';
-
-// 1. 회원 삭제 핸들러 함수 직접 포함 (또는 별도 파일에서 import 하셔도 됩니다)
-async function handleDeleteUser(request, supabaseAdmin) {
-  try {
-    const url = new URL(request.url);
-    const pathSegments = url.pathname.split('/');
-    const userId = pathSegments[pathSegments.length - 1]; // URL 마지막 경로의 UUID 추출
-
-    if (!userId || userId === 'delete') {
-      return new Response(JSON.stringify({ error: '삭제할 회원 ID가 지정되지 않았습니다.' }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
-      });
-    }
-
-    // 1. Supabase Auth 관리자 API를 통해 Auth 계정 완전 삭제
-    const { error: authDeleteError } = await supabaseAdmin.auth.admin.deleteUser(userId);
-
-    if (authDeleteError) {
-      console.warn('Auth 삭제 경고 (이미 없거나 처리됨):', authDeleteError.message);
-    }
-
-    // 2. users 테이블에서 해당 프로필 정보 삭제
-    const { error: dbDeleteError } = await supabaseAdmin
-      .from('users')
-      .delete()
-      .eq('id', userId);
-
-    if (dbDeleteError) {
-      throw new Error(dbDeleteError.message);
-    }
-
-    return new Response(JSON.stringify({ success: true, message: '회원이 완전히 삭제되었습니다.' }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
-    });
-
-  } catch (err) {
-    return new Response(JSON.stringify({ error: err.message || '서버 오류 발생' }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
-    });
-  }
-}
 
 export default {
   async fetch(request, env, ctx) {

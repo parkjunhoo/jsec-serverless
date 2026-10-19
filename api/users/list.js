@@ -1,26 +1,19 @@
+import { authenticateRequest, jsonResponse } from '../push.js';
+
 export async function handleListUsers(request, supabaseAdmin) {
   try {
+    const auth = await authenticateRequest(request, supabaseAdmin);
+    if (auth.error) return auth.error;
+
     const { data, error } = await supabaseAdmin
       .from('users')
-      .select('*')
+      .select('id, username, name, role, contract_type, work_location, hire_date, annual_base_date, phone, color, status')
       .order('name', { ascending: true });
 
-    if (error) {
-      return new Response(JSON.stringify({ error: error.message }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
-      });
-    }
-
-    return new Response(JSON.stringify(data), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
-    });
-
+    if (error) throw error;
+    return jsonResponse(data || []);
   } catch (err) {
-    return new Response(JSON.stringify({ error: err.message || '서버 오류 발생' }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
-    });
+    console.error('회원 목록 조회 오류:', err);
+    return jsonResponse({ error: err.message || '서버 오류 발생' }, 500);
   }
 }

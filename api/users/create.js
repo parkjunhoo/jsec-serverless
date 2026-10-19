@@ -1,29 +1,41 @@
+import { authenticateRequest, jsonResponse } from '../push.js';
+
 export async function handleCreateUser(request, supabaseAdmin) {
   try {
-    const body = await request.json();
-    const { username, name, password, role, contract_type, work_location, hire_date, annual_base_date, phone } = body;
-
-    if (!password) {
-      return new Response(JSON.stringify({ error: '비밀번호는 필수 입력 항목입니다.' }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
-      });
+    const auth = await authenticateRequest(request, supabaseAdmin);
+    if (auth.error) return auth.error;
+    if (auth.profile.role !== 'admin') {
+      return jsonResponse({ error: '관리자만 회원을 등록할 수 있습니다.' }, 403);
     }
 
-    const realUserName = username || name || '이름 없음';
+    const body = await request.json();
+    const { username, name, password, role, contract_type, work_location, hire_date, annual_base_date, phone, color } = body;
 
-    // 1. 기존 users 테이블 수 카운트하여 순차 번호(0, 1, 2...) 생성
-    const { count, error: countError } = await supabaseAdmin
+    if (typeof password !== 'string' || !password.trim()) {
+      return jsonResponse({ error: '비밀번호는 필수 입력 항목입니다.' }, 400);
+    }
+    if (role !== undefined && !['user', 'admin'].includes(role)) {
+      return jsonResponse({ error: '사용자 권한 값이 올바르지 않습니다.' }, 400);
+    }
+    if (color !== undefined && (typeof color !== 'string' || !/^#[\da-f]{6}$/i.test(color))) {
+      return jsonResponse({ error: '사용자 색상 값이 올바르지 않습니다.' }, 400);
+    }
+    const realUserName = (typeof username === 'string' ? username : typeof name === 'string' ? name : '').trim();
+    if (!realUserName || realUserName.length > 100) {
+      return jsonResponse({ error: '이름은 1~100자 이내로 입력해 주세요.' }, 400);
+    }
+
+    const { data: profiles, error: profilesError } = await supabaseAdmin
       .from('users')
-      .select('*', { count: 'exact', head: true });
-
-    if (countError) throw countError;
-
-    const nextIndex = count !== null ? count : 0;
+      .select('email');
+    if (profilesError) throw profilesError;
+    const usedEmails = new Set((profiles || []).map(profile => profile.email));
+    let nextIndex = 0;
+    while (usedEmails.has(`${nextIndex}@jsec.com`)) nextIndex += 1;
     const virtualEmail = `${nextIndex}@jsec.com`; // 예: 12@jsec.com
 
     // 💡 2. 관리자가 입력한 4자리 비밀번호 뒤에 'jsec'을 붙여서 6자리 이상으로 변환 (Supabase Auth 정책 대응)
-    const securePassword = password.trim() + "jsec";
+    const securePassword = password.trim() + 'jsec';
 
     // 3. Supabase Auth 계정 생성
     const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
@@ -33,10 +45,7 @@ export async function handleCreateUser(request, supabaseAdmin) {
     });
 
     if (authError) {
-      return new Response(JSON.stringify({ error: authError.message }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
-      });
+      return jsonResponse({ error: authError.message }, 400);
     }
 
     const userId = authData.user.id; // 생성된 Auth의 UUID
@@ -55,25 +64,25 @@ export async function handleCreateUser(request, supabaseAdmin) {
         hire_date: hire_date || null,
         annual_base_date: annual_base_date || null,
         phone: phone || '',
+        color: typeof color === 'string' ? color : '#38bdf8',
         status: '재직'
       }]);
 
     if (insertError) {
-      return new Response(JSON.stringify({ error: insertError.message }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
-      });
+      const { error: rollbackError } = await supabaseAdmin.auth.admin.deleteUser(userId);
+      if (rollbackError) {
+        console.error('프로필 저장 실패 후 Auth 계정 정리 오류:', rollbackError);
+        return jsonResponse({
+          error: `회원 프로필 저장에 실패했고 Auth 계정 정리도 실패했습니다. 관리자에게 문의해 주세요. (${insertError.message})`
+        }, 500);
+      }
+      return jsonResponse({ error: insertError.message }, 400);
     }
 
-    return new Response(JSON.stringify({ success: true, message: '회원이 성공적으로 등록되었습니다.' }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
-    });
+    return jsonResponse({ success: true, message: '회원이 성공적으로 등록되었습니다.' });
 
   } catch (err) {
-    return new Response(JSON.stringify({ error: err.message || '서버 오류 발생' }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
-    });
+    console.error('회원 등록 오류:', err);
+    return jsonResponse({ error: err.message || '서버 오류 발생' }, 500);
   }
 }
