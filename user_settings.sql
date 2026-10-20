@@ -1,9 +1,13 @@
 CREATE TABLE IF NOT EXISTS public.user_settings (
   user_id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   theme text NOT NULL DEFAULT 'dark' CHECK (theme IN ('dark', 'light')),
+  large_text_mode boolean NOT NULL DEFAULT false,
   calendar_location_filters text[] NOT NULL DEFAULT ARRAY['주간', '야간', '스키장', '골프장', '현관', 'other']::text[],
   updated_at timestamptz NOT NULL DEFAULT now()
 );
+
+ALTER TABLE public.user_settings
+  ADD COLUMN IF NOT EXISTS large_text_mode boolean NOT NULL DEFAULT false;
 
 ALTER TABLE public.user_settings ENABLE ROW LEVEL SECURITY;
 
