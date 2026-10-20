@@ -71,7 +71,7 @@ export async function handleCreateVacation(request, supabaseAdmin, env, context)
     const body = await request.json();
     const date = typeof body.date === 'string' ? body.date : '';
     const leaveType = typeof body.leave_type === 'string' ? body.leave_type : '';
-    if (!isValidDate(date) || !['휴무', '연차', '시간차'].includes(leaveType)) {
+    if (!isValidDate(date) || !['휴무', '연차', '시간차', '공가'].includes(leaveType)) {
       return jsonResponse({ error: '휴무 날짜 또는 종류가 올바르지 않습니다.' }, 400);
     }
     const timeDetail = typeof body.time_detail === 'string' ? body.time_detail : '종일';
@@ -129,7 +129,7 @@ export async function handleUpdateVacation(request, supabaseAdmin, env, context,
     const body = await request.json();
     const date = typeof body.date === 'string' ? body.date : '';
     const leaveType = typeof body.leave_type === 'string' ? body.leave_type : '';
-    if (!isValidDate(date) || !['휴무', '연차', '시간차'].includes(leaveType)) {
+    if (!isValidDate(date) || !['휴무', '연차', '시간차', '공가'].includes(leaveType)) {
       return jsonResponse({ error: '휴무 날짜 또는 종류가 올바르지 않습니다.' }, 400);
     }
     const timeDetail = typeof body.time_detail === 'string' ? body.time_detail : '종일';
