@@ -5,6 +5,11 @@ import { handleDeleteUser } from './api/users/delete.js';
 import { handleListUsers } from './api/users/list.js';
 import { handleUpdateUser } from './api/users/update.js';
 import {
+  handleCreateItemRequest,
+  handleListItemRequests,
+  handleReviewItemRequest
+} from './api/item-requests.js';
+import {
   handleCreateVacation,
   handleDeleteVacation,
   handleListVacations,
@@ -85,6 +90,17 @@ export default {
       if (url.pathname.startsWith('/api/users/') && request.method === 'PATCH') {
         const userId = url.pathname.slice('/api/users/'.length);
         return await handleUpdateUser(request, supabaseAdmin, userId);
+      }
+
+      if (url.pathname === '/api/item-requests' && request.method === 'GET') {
+        return await handleListItemRequests(request, supabaseAdmin);
+      }
+      if (url.pathname === '/api/item-requests' && request.method === 'POST') {
+        return await handleCreateItemRequest(request, supabaseAdmin);
+      }
+      if (url.pathname.startsWith('/api/item-requests/') && request.method === 'PATCH') {
+        const requestId = url.pathname.slice('/api/item-requests/'.length);
+        return await handleReviewItemRequest(request, supabaseAdmin, requestId);
       }
 
       if (url.pathname === '/api/push/register' && request.method === 'POST') {
