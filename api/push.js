@@ -80,6 +80,87 @@ async function getFcmAccessToken(serviceAccount) {
   return cachedAccessToken;
 }
 
+export async function sendPushToUsers(supabaseAdmin, env, userIds, notification) {
+  if (!env.FCM_SERVICE_ACCOUNT_JSON) {
+    throw new Error('FCM_SERVICE_ACCOUNT_JSON secret이 설정되지 않았습니다.');
+  }
+
+  let serviceAccount;
+  try {
+    serviceAccount = JSON.parse(env.FCM_SERVICE_ACCOUNT_JSON);
+  } catch {
+    throw new Error('FCM_SERVICE_ACCOUNT_JSON이 올바른 JSON이 아닙니다.');
+  }
+  if (!serviceAccount.project_id || !serviceAccount.client_email || !serviceAccount.private_key) {
+    throw new Error('FCM 서비스 계정 JSON에 필수 항목이 없습니다.');
+  }
+
+  const uniqueUserIds = [...new Set(userIds)];
+  if (uniqueUserIds.length === 0) return { sent: 0, failed: 0 };
+  const registrations = [];
+  for (let offset = 0; ; offset += 1000) {
+    const { data, error } = await supabaseAdmin
+      .from('push_tokens')
+      .select('token, user_id, enabled')
+      .in('user_id', uniqueUserIds)
+      .range(offset, offset + 999);
+    if (error) throw error;
+    registrations.push(...(data || []));
+    if (!data || data.length < 1000) break;
+  }
+
+  const enabledRegistrations = registrations.filter(registration => registration.enabled);
+  if (enabledRegistrations.length === 0) return { sent: 0, failed: 0 };
+  const accessToken = await getFcmAccessToken(serviceAccount);
+  let sent = 0;
+  let failed = 0;
+
+  for (let offset = 0; offset < enabledRegistrations.length; offset += 25) {
+    const batch = enabledRegistrations.slice(offset, offset + 25);
+    const results = await Promise.all(batch.map(async ({ token }) => {
+      const response = await fetch(
+        `https://fcm.googleapis.com/v1/projects/${encodeURIComponent(serviceAccount.project_id)}/messages:send`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            message: {
+              token,
+              notification: {
+                title: notification.title,
+                body: notification.body
+              },
+              data: { type: notification.type },
+              android: { priority: 'high' }
+            }
+          })
+        }
+      );
+
+      if (response.ok) return { token, sent: true };
+      const result = await response.json().catch(() => ({}));
+      const details = JSON.stringify(result);
+      if (details.includes('UNREGISTERED') || details.includes('INVALID_ARGUMENT')) {
+        const { error: deleteError } = await supabaseAdmin
+          .from('push_tokens')
+          .delete()
+          .eq('token', token);
+        if (deleteError) console.error('FCM 토큰 정리 실패:', deleteError.message);
+      }
+      console.error('FCM 발송 실패:', response.status, result);
+      return { token, sent: false };
+    }));
+
+    sent += results.filter(result => result.sent).length;
+    failed += results.length - results.filter(result => result.sent).length;
+  }
+
+  return { sent, failed };
+}
+
 export async function sendPushToAll(supabaseAdmin, env, notification) {
   if (!env.FCM_SERVICE_ACCOUNT_JSON) {
     throw new Error('FCM_SERVICE_ACCOUNT_JSON secret이 설정되지 않았습니다.');
@@ -413,6 +494,14 @@ export function schedulePush(context, supabaseAdmin, env, notification) {
     sendPushToAll(supabaseAdmin, env, notification)
       .then(result => console.log('FCM 발송 결과:', notification.type, result))
       .catch(error => console.error('FCM 발송 오류:', error.message))
+  );
+}
+
+export function schedulePushToUsers(context, supabaseAdmin, env, userIds, notification) {
+  context.waitUntil(
+    sendPushToUsers(supabaseAdmin, env, userIds, notification)
+      .then(result => console.log('FCM 대상 발송 결과:', notification.type, result))
+      .catch(error => console.error('FCM 대상 발송 오류:', error.message))
   );
 }
 

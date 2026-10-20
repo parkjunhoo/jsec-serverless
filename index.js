@@ -96,7 +96,7 @@ export default {
         return await handleListItemRequests(request, supabaseAdmin);
       }
       if (url.pathname === '/api/item-requests' && request.method === 'POST') {
-        return await handleCreateItemRequest(request, supabaseAdmin);
+        return await handleCreateItemRequest(request, supabaseAdmin, env, ctx);
       }
       if (url.pathname.startsWith('/api/item-requests/') && request.method === 'PATCH') {
         const requestId = url.pathname.slice('/api/item-requests/'.length);

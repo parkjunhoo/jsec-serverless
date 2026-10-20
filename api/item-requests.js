@@ -1,4 +1,4 @@
-import { authenticateRequest, jsonResponse } from './push.js';
+import { authenticateRequest, jsonResponse, schedulePushToUsers } from './push.js';
 
 const REQUEST_FIELDS = 'id, user_id, username, item_name, quantity, specification, reason, example_url, status, review_note, reviewed_by, reviewed_at, created_at, updated_at';
 const REQUEST_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -46,7 +46,7 @@ export async function handleListItemRequests(request, supabaseAdmin) {
   }
 }
 
-export async function handleCreateItemRequest(request, supabaseAdmin) {
+export async function handleCreateItemRequest(request, supabaseAdmin, env, context) {
   try {
     const auth = await authenticateRequest(request, supabaseAdmin);
     if (auth.error) return auth.error;
@@ -90,15 +90,17 @@ export async function handleCreateItemRequest(request, supabaseAdmin) {
     if (error) throw error;
 
     let notificationWarning = '';
+    let adminUserIds = [];
     try {
       const { data: admins, error: adminsError } = await supabaseAdmin
         .from('users')
         .select('id')
         .eq('role', 'admin');
       if (adminsError) throw adminsError;
+      adminUserIds = (admins || []).map(admin => admin.id);
       const notificationError = await notifyUsers(
         supabaseAdmin,
-        (admins || []).map(admin => admin.id),
+        adminUserIds,
         '새 물품 신청',
         `${data.username} 님이 ${data.item_name} ${data.quantity}개를 신청했습니다.`,
         'item_request'
@@ -107,6 +109,14 @@ export async function handleCreateItemRequest(request, supabaseAdmin) {
     } catch (notificationError) {
       console.error('물품 신청 등록 후 관리자 알림 전송 오류:', notificationError);
       notificationWarning = '신청은 등록됐지만 관리자 알림 전송에 실패했습니다.';
+    }
+
+    if (adminUserIds.length > 0) {
+      schedulePushToUsers(context, supabaseAdmin, env, adminUserIds, {
+        title: '새 물품 신청',
+        body: `${data.username} 님이 ${data.item_name} ${data.quantity}개를 신청했습니다.`,
+        type: 'item_request'
+      });
     }
 
     return jsonResponse({ success: true, request: data, notificationWarning }, 201);
