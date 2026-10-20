@@ -6,6 +6,7 @@ import { handleListUsers } from './api/users/list.js';
 import { handleUpdateUser } from './api/users/update.js';
 import {
   handleCreateItemRequest,
+  handleDeleteItemRequest,
   handleListItemRequests,
   handleReviewItemRequest
 } from './api/item-requests.js';
@@ -97,6 +98,10 @@ export default {
       }
       if (url.pathname === '/api/item-requests' && request.method === 'POST') {
         return await handleCreateItemRequest(request, supabaseAdmin, env, ctx);
+      }
+      if (url.pathname.startsWith('/api/item-requests/') && request.method === 'DELETE') {
+        const requestId = url.pathname.slice('/api/item-requests/'.length);
+        return await handleDeleteItemRequest(request, supabaseAdmin, requestId);
       }
       if (url.pathname.startsWith('/api/item-requests/') && request.method === 'PATCH') {
         const requestId = url.pathname.slice('/api/item-requests/'.length);

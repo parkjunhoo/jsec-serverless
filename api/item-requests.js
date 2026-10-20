@@ -183,3 +183,26 @@ export async function handleReviewItemRequest(request, supabaseAdmin, requestId)
     return jsonResponse({ error: error.message || '물품 신청을 처리하지 못했습니다.' }, 500);
   }
 }
+
+export async function handleDeleteItemRequest(request, supabaseAdmin, requestId) {
+  try {
+    const auth = await authenticateRequest(request, supabaseAdmin);
+    if (auth.error) return auth.error;
+    if (auth.profile.role !== 'admin') return jsonResponse({ error: '관리자만 물품 신청 내역을 삭제할 수 있습니다.' }, 403);
+    if (!REQUEST_ID_PATTERN.test(requestId || '')) return jsonResponse({ error: '신청 ID가 올바르지 않습니다.' }, 400);
+
+    const { data, error } = await supabaseAdmin
+      .from('item_requests')
+      .delete()
+      .eq('id', requestId)
+      .select('id')
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) return jsonResponse({ error: '삭제할 물품 신청 내역을 찾을 수 없습니다.' }, 404);
+
+    return jsonResponse({ success: true });
+  } catch (error) {
+    console.error('물품 신청 내역 삭제 오류:', error);
+    return jsonResponse({ error: error.message || '물품 신청 내역을 삭제하지 못했습니다.' }, 500);
+  }
+}
