@@ -8,8 +8,8 @@ export async function handleLogin(request, supabaseAdmin) {
 
   try {
     const body = await request.json();
-    const inputVal = body.username ? body.username.trim() : '';
-    const rawPassword = body.password ? body.password.trim() : ''; // 사용자가 입력한 4자리 등
+    const inputVal = typeof body?.username === 'string' ? body.username.trim() : '';
+    const rawPassword = typeof body?.password === 'string' ? body.password.trim() : ''; // 사용자가 입력한 4자리 등
 
     if (!inputVal || !rawPassword) {
       return new Response(JSON.stringify({ error: '아이디(이름)와 비밀번호를 모두 입력해 주세요.' }), {
@@ -18,15 +18,31 @@ export async function handleLogin(request, supabaseAdmin) {
       });
     }
 
-    // 1. 사용자 프로필 조회 (이름, username, email 모두 대응)
-    const { data: userProfile, error: profileError } = await supabaseAdmin
-      .from('users')
-      .select('email, username, name')
-      .or(`username.eq.${inputVal},email.eq.${inputVal},name.eq.${inputVal}`)
-      .maybeSingle();
+    // Query each identifier exactly so punctuation in the input cannot alter a PostgREST filter.
+    const matches = new Map();
+    for (const field of ['username', 'email', 'name']) {
+      const { data, error } = await supabaseAdmin
+        .from('users')
+        .select('id, email, username, name')
+        .eq(field, inputVal)
+        .limit(2);
+      if (error) throw error;
+      for (const profile of data || []) matches.set(profile.id, profile);
+    }
 
-    if (profileError || !userProfile || !userProfile.email) {
-      return new Response(JSON.stringify({ error: `사용자를 찾을 수 없습니다. (입력값: "${inputVal}")` }), {
+    if (matches.size !== 1) {
+      return new Response(JSON.stringify({
+        error: matches.size > 1
+          ? '로그인 식별자가 중복되어 계정을 확인할 수 없습니다. 관리자에게 문의해 주세요.'
+          : '사용자를 찾을 수 없습니다.'
+      }), {
+        status: 400,
+        headers: corsHeaders
+      });
+    }
+    const userProfile = matches.values().next().value;
+    if (!userProfile.email) {
+      return new Response(JSON.stringify({ error: '로그인 계정 정보를 확인할 수 없습니다. 관리자에게 문의해 주세요.' }), {
         status: 400,
         headers: corsHeaders
       });

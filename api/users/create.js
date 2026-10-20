@@ -1,4 +1,5 @@
 import { authenticateRequest, jsonResponse } from '../push.js';
+import { hasLoginIdentifierConflict, validateUserFields } from './validation.js';
 
 export async function handleCreateUser(request, supabaseAdmin) {
   try {
@@ -8,21 +9,36 @@ export async function handleCreateUser(request, supabaseAdmin) {
       return jsonResponse({ error: '관리자만 회원을 등록할 수 있습니다.' }, 403);
     }
 
-    const body = await request.json();
+    let body;
+    try {
+      body = await request.json();
+    } catch {
+      return jsonResponse({ error: '요청 내용이 올바른 JSON이 아닙니다.' }, 400);
+    }
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return jsonResponse({ error: '회원 정보를 입력해 주세요.' }, 400);
+    }
     const { username, name, password, role, contract_type, work_location, hire_date, annual_base_date, phone, color } = body;
 
     if (typeof password !== 'string' || !password.trim()) {
       return jsonResponse({ error: '비밀번호는 필수 입력 항목입니다.' }, 400);
     }
-    if (role !== undefined && !['user', 'admin'].includes(role)) {
-      return jsonResponse({ error: '사용자 권한 값이 올바르지 않습니다.' }, 400);
-    }
-    if (color !== undefined && (typeof color !== 'string' || !/^#[\da-f]{6}$/i.test(color))) {
-      return jsonResponse({ error: '사용자 색상 값이 올바르지 않습니다.' }, 400);
-    }
     const realUserName = (typeof username === 'string' ? username : typeof name === 'string' ? name : '').trim();
-    if (!realUserName || realUserName.length > 100) {
-      return jsonResponse({ error: '이름은 1~100자 이내로 입력해 주세요.' }, 400);
+    const validation = validateUserFields({
+      name: realUserName,
+      role: role === undefined ? 'user' : role,
+      contract_type: contract_type === undefined ? '정규직' : contract_type,
+      work_location: work_location === undefined ? '지산리조트' : work_location,
+      hire_date: hire_date === undefined ? null : hire_date,
+      annual_base_date: annual_base_date === undefined ? null : annual_base_date,
+      phone: phone === undefined ? '' : phone,
+      color: color === undefined ? '#38bdf8' : color
+    });
+    if (validation.error) return jsonResponse({ error: validation.error }, 400);
+    const profile = validation.values;
+
+    if (await hasLoginIdentifierConflict(supabaseAdmin, profile.name)) {
+      return jsonResponse({ error: '이미 사용 중인 로그인 식별자와 중복되는 이름입니다.' }, 409);
     }
 
     const { data: profiles, error: profilesError } = await supabaseAdmin
@@ -60,17 +76,17 @@ export async function handleCreateUser(request, supabaseAdmin) {
       .from('users')
       .insert([{
         id: userId,                      // Auth UID 매핑
-        username: realUserName,          
-        name: realUserName,              
-        email: virtualEmail,             
-        role: role || 'user',
+        username: profile.name,
+        name: profile.name,
+        email: virtualEmail,
+        role: profile.role,
         job_title: jobTitle,
-        contract_type: contract_type || '정규직',
-        work_location: work_location || '지산리조트',
-        hire_date: hire_date || null,
-        annual_base_date: annual_base_date || null,
-        phone: phone || '',
-        color: typeof color === 'string' ? color : '#38bdf8',
+        contract_type: profile.contract_type,
+        work_location: profile.work_location,
+        hire_date: profile.hire_date,
+        annual_base_date: profile.annual_base_date,
+        phone: profile.phone,
+        color: profile.color,
         status: '재직'
       }]);
 
