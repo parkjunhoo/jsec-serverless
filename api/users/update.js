@@ -4,6 +4,7 @@ const USER_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f
 const ADMIN_FIELDS = new Set([
   'name',
   'role',
+  'job_title',
   'contract_type',
   'status',
   'work_location',
@@ -69,6 +70,12 @@ export async function handleUpdateUser(request, supabaseAdmin, userId) {
           return jsonResponse({ error: '사용자 권한 값이 올바르지 않습니다.' }, 400);
         }
         updateData.role = body.role;
+      }
+      if (Object.hasOwn(body, 'job_title')) {
+        if (!['소장', '부소장', '사원'].includes(body.job_title)) {
+          return jsonResponse({ error: '직책 값이 올바르지 않습니다.' }, 400);
+        }
+        updateData.job_title = body.job_title;
       }
       if (Object.hasOwn(body, 'contract_type')) {
         if (!['정규직', '계약직', '아르바이트'].includes(body.contract_type)) {

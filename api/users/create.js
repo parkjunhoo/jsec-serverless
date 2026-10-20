@@ -49,6 +49,11 @@ export async function handleCreateUser(request, supabaseAdmin) {
     }
 
     const userId = authData.user.id; // 생성된 Auth의 UUID
+    const jobTitle = realUserName === '지은석'
+      ? '소장'
+      : realUserName === '김동석'
+        ? '부소장'
+        : '사원';
 
     // 4. users 테이블에 프로필 저장
     const { error: insertError } = await supabaseAdmin
@@ -59,6 +64,7 @@ export async function handleCreateUser(request, supabaseAdmin) {
         name: realUserName,              
         email: virtualEmail,             
         role: role || 'user',
+        job_title: jobTitle,
         contract_type: contract_type || '정규직',
         work_location: work_location || '지산리조트',
         hire_date: hire_date || null,
