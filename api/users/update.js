@@ -8,13 +8,14 @@ const ADMIN_FIELDS = new Set([
   'job_title',
   'contract_type',
   'status',
+  'resignation_reason',
   'work_location',
   'hire_date',
   'annual_base_date',
   'phone',
   'color'
 ]);
-const GUEST_FIELDS = new Set(['name', 'role', 'status', 'phone']);
+const GUEST_FIELDS = new Set(['name', 'role', 'status', 'resignation_reason', 'phone']);
 const isGuestRole = role => role === 'guest' || role === 'monitor';
 
 export async function handleUpdateUser(request, supabaseAdmin, userId) {
@@ -66,6 +67,9 @@ export async function handleUpdateUser(request, supabaseAdmin, userId) {
     const validation = validateUserFields(fieldsToValidate);
     if (validation.error) return jsonResponse({ error: validation.error }, 400);
     const updateData = validation.values;
+    if (isAdmin && updateData.status === '퇴직' && !updateData.resignation_reason?.trim()) {
+      return jsonResponse({ error: '퇴사 사유를 입력해 주세요.' }, 400);
+    }
 
     if (isAdmin && Object.hasOwn(updateData, 'name') &&
         await hasLoginIdentifierConflict(supabaseAdmin, updateData.name, userId)) {

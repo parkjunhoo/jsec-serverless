@@ -29,6 +29,13 @@ const FIELD_VALIDATORS = {
     }
     return { value };
   },
+  resignation_reason(value) {
+    if (value === null || value === '') return { value: null };
+    if (typeof value !== 'string' || value.trim().length > 500) {
+      return { error: '퇴사 사유는 500자 이내로 입력해 주세요.' };
+    }
+    return { value: value.trim() };
+  },
   work_location(value) {
     if (typeof value !== 'string' || !value.trim() || value.trim().length > 100) {
       return { error: '근무지는 1~100자 이내로 입력해 주세요.' };

@@ -7,7 +7,7 @@ export async function handleListUsers(request, supabaseAdmin) {
 
     const { data, error } = await supabaseAdmin
       .from('users')
-      .select('id, username, name, role, job_title, contract_type, work_location, hire_date, annual_base_date, phone, color, status')
+      .select('id, username, name, role, job_title, contract_type, work_location, hire_date, annual_base_date, phone, color, status, resignation_reason')
       .order('name', { ascending: true });
 
     if (error) throw error;
