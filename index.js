@@ -27,6 +27,7 @@ import {
   handleListCalendarNotes,
   handleSaveCalendarNote
 } from './api/calendar-notes.js';
+import { handleGetResortNotice, handleListResortNotices } from './api/resort-notices.js';
 import {
   handleCreateAllowance,
   handleDeleteAllowance,
@@ -159,6 +160,13 @@ export default {
       // 7. 휴무 관련 라우팅 분기
       if (url.pathname === '/api/vacations' && request.method === 'GET') {
         return await handleListVacations(request, supabaseAdmin);
+      }
+      if (url.pathname === '/api/resort-notices' && request.method === 'GET') {
+        return await handleListResortNotices(request, supabaseAdmin);
+      }
+      if (url.pathname.startsWith('/api/resort-notices/') && request.method === 'GET') {
+        const noticeId = url.pathname.slice('/api/resort-notices/'.length);
+        return await handleGetResortNotice(request, supabaseAdmin, noticeId);
       }
       if (url.pathname === '/api/vacations/create' && request.method === 'POST') {
         return await handleCreateVacation(request, supabaseAdmin, env, ctx);
