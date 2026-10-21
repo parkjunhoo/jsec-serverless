@@ -23,7 +23,7 @@ export async function handleLogin(request, supabaseAdmin) {
     for (const field of ['username', 'email', 'name']) {
       const { data, error } = await supabaseAdmin
         .from('users')
-        .select('id, email, username, name')
+        .select('id, email, username, name, status')
         .eq(field, inputVal)
         .limit(2);
       if (error) throw error;
@@ -41,6 +41,12 @@ export async function handleLogin(request, supabaseAdmin) {
       });
     }
     const userProfile = matches.values().next().value;
+    if (userProfile.status === '퇴직') {
+      return new Response(JSON.stringify({ error: '퇴직 처리된 계정은 로그인할 수 없습니다. 관리자에게 문의해 주세요.' }), {
+        status: 403,
+        headers: corsHeaders
+      });
+    }
     if (!userProfile.email) {
       return new Response(JSON.stringify({ error: '로그인 계정 정보를 확인할 수 없습니다. 관리자에게 문의해 주세요.' }), {
         status: 400,

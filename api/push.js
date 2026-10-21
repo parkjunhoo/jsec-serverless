@@ -284,12 +284,15 @@ export async function authenticateRequest(request, supabaseAdmin) {
 
   const { data: profile, error: profileError } = await supabaseAdmin
     .from('users')
-    .select('id, name, username, role')
+    .select('id, name, username, role, status')
     .eq('id', data.user.id)
     .maybeSingle();
   if (profileError) throw profileError;
   if (!profile) {
     return { error: jsonResponse({ error: '사용자 프로필을 찾을 수 없습니다.' }, 403) };
+  }
+  if (profile.status === '퇴직') {
+    return { error: jsonResponse({ error: '퇴직 처리된 계정은 이용할 수 없습니다.' }, 403) };
   }
 
   return { user: data.user, profile };
