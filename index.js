@@ -38,6 +38,7 @@ import {
 } from './api/allowances.js';
 import {
   handleCreateAnnualLeaveRequest,
+  handleDeleteAnnualLeaveRequest,
   handleListAnnualLeaveRequests,
   handleReviewAnnualLeaveRequest
 } from './api/annual-leave-requests.js';
@@ -171,6 +172,10 @@ export default {
       }
       if (url.pathname === '/api/annual-leave-requests' && request.method === 'POST') {
         return await handleCreateAnnualLeaveRequest(request, supabaseAdmin, env, ctx);
+      }
+      if (url.pathname.startsWith('/api/annual-leave-requests/') && request.method === 'DELETE') {
+        const requestId = decodeURIComponent(url.pathname.slice('/api/annual-leave-requests/'.length));
+        return await handleDeleteAnnualLeaveRequest(request, supabaseAdmin, requestId);
       }
       if (url.pathname.startsWith('/api/annual-leave-requests/') && request.method === 'PATCH') {
         const requestId = decodeURIComponent(url.pathname.slice('/api/annual-leave-requests/'.length));

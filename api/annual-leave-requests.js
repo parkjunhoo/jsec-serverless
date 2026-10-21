@@ -257,3 +257,34 @@ export async function handleReviewAnnualLeaveRequest(request, supabaseAdmin, env
     return jsonResponse({ error: error.message || '연차 신청을 처리하지 못했습니다.' }, 500);
   }
 }
+
+export async function handleDeleteAnnualLeaveRequest(request, supabaseAdmin, requestId) {
+  try {
+    const auth = await authenticateRequest(request, supabaseAdmin);
+    if (auth.error) return auth.error;
+    if (auth.profile.role === 'guest' || auth.profile.role === 'monitor') {
+      return jsonResponse({ error: '연차 신청 내역을 삭제할 권한이 없습니다.' }, 403);
+    }
+    if (!REQUEST_ID_PATTERN.test(requestId || '')) {
+      return jsonResponse({ error: '연차 신청 ID가 올바르지 않습니다.' }, 400);
+    }
+
+    let query = supabaseAdmin
+      .from('annual_leave_requests')
+      .delete()
+      .eq('id', requestId);
+    if (auth.profile.role !== 'admin') query = query.eq('user_id', auth.user.id);
+
+    const { data, error } = await query.select('id, status').maybeSingle();
+    if (error) throw error;
+    if (!data) return jsonResponse({ error: '삭제할 연차 신청 내역을 찾을 수 없습니다.' }, 404);
+
+    return jsonResponse({
+      success: true,
+      approvedSchedulePreserved: data.status === 'approved'
+    });
+  } catch (error) {
+    console.error('연차 신청 내역 삭제 오류:', error);
+    return jsonResponse({ error: error.message || '연차 신청 내역을 삭제하지 못했습니다.' }, 500);
+  }
+}
