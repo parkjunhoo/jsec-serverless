@@ -322,7 +322,9 @@ export async function handleRegisterPushToken(request, supabaseAdmin) {
       token,
       user_id: auth.user.id,
       platform: 'android',
-      enabled: existingToken ? existingToken.enabled : true,
+      enabled: existingToken
+        ? existingToken.enabled
+        : auth.profile.role !== 'guest' && auth.profile.role !== 'monitor',
       updated_at: new Date().toISOString()
     }, { onConflict: 'token' });
   if (error) throw error;
