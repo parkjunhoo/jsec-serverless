@@ -37,6 +37,11 @@ import {
   handleUpdateAllowance
 } from './api/allowances.js';
 import {
+  handleCreateAnnualLeaveRequest,
+  handleListAnnualLeaveRequests,
+  handleReviewAnnualLeaveRequest
+} from './api/annual-leave-requests.js';
+import {
   handleBroadcastPush,
   handleDeleteAllNotifications,
   handleDeleteNotification,
@@ -160,6 +165,16 @@ export default {
       // 7. 휴무 관련 라우팅 분기
       if (url.pathname === '/api/vacations' && request.method === 'GET') {
         return await handleListVacations(request, supabaseAdmin);
+      }
+      if (url.pathname === '/api/annual-leave-requests' && request.method === 'GET') {
+        return await handleListAnnualLeaveRequests(request, supabaseAdmin);
+      }
+      if (url.pathname === '/api/annual-leave-requests' && request.method === 'POST') {
+        return await handleCreateAnnualLeaveRequest(request, supabaseAdmin, env, ctx);
+      }
+      if (url.pathname.startsWith('/api/annual-leave-requests/') && request.method === 'PATCH') {
+        const requestId = decodeURIComponent(url.pathname.slice('/api/annual-leave-requests/'.length));
+        return await handleReviewAnnualLeaveRequest(request, supabaseAdmin, env, ctx, requestId);
       }
       if (url.pathname === '/api/resort-notices' && request.method === 'GET') {
         return await handleListResortNotices(request, supabaseAdmin);
