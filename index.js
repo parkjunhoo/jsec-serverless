@@ -29,6 +29,11 @@ import {
 } from './api/calendar-notes.js';
 import { handleGetResortNotice, handleListResortNotices } from './api/resort-notices.js';
 import {
+  handleGetMealPlan,
+  handleGetMealPlanImage,
+  handleSaveMealPlan
+} from './api/meal-plan.js';
+import {
   handleCreateAllowance,
   handleDeleteAllowance,
   handleListAllowanceAvailability,
@@ -233,6 +238,16 @@ export default {
       if (url.pathname.startsWith('/api/calendar-notes/') && request.method === 'DELETE') {
         const date = url.pathname.slice('/api/calendar-notes/'.length);
         return await handleDeleteCalendarNote(request, supabaseAdmin, date);
+      }
+
+      if (url.pathname === '/api/meal-plan' && request.method === 'GET') {
+        return await handleGetMealPlan(request, supabaseAdmin);
+      }
+      if (url.pathname === '/api/meal-plan' && request.method === 'POST') {
+        return await handleSaveMealPlan(request, supabaseAdmin, env, ctx);
+      }
+      if (url.pathname === '/api/meal-plan/image' && request.method === 'GET') {
+        return await handleGetMealPlanImage(request, supabaseAdmin, env);
       }
 
       // 8. 404 경로 처리
