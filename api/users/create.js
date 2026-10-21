@@ -67,7 +67,7 @@ export async function handleCreateUser(request, supabaseAdmin) {
 
     const userId = authData.user.id; // 생성된 Auth의 UUID
     const jobTitle = isGuest
-      ? '게스트'
+      ? null
       : realUserName === '지은석'
       ? '소장'
       : realUserName === '김동석'

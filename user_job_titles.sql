@@ -1,6 +1,9 @@
 ALTER TABLE public.users
   ADD COLUMN IF NOT EXISTS job_title text NOT NULL DEFAULT '사원';
 
+ALTER TABLE public.users
+  ALTER COLUMN job_title DROP NOT NULL;
+
 UPDATE public.users
 SET job_title = CASE name
   WHEN '지은석' THEN '소장'
