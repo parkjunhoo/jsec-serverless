@@ -1,6 +1,6 @@
 import { authenticateRequest, jsonResponse, schedulePushToUsers } from './push.js';
 
-const REQUEST_FIELDS = 'id, user_id, username, department, start_date, start_time, end_date, end_time, total_days, details, status, review_note, reviewed_by, reviewed_at, created_at, updated_at';
+const REQUEST_FIELDS = 'id, user_id, username, department, leave_type, start_date, start_time, end_date, end_time, total_days, hours_used, details, status, review_note, reviewed_by, reviewed_at, created_at, updated_at';
 const REQUEST_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_PATTERN = /^\d{2}:\d{2}$/;
@@ -78,9 +78,13 @@ export async function handleCreateAnnualLeaveRequest(request, supabaseAdmin, env
     const endDate = typeof body.end_date === 'string' ? body.end_date : '';
     const startTime = typeof body.start_time === 'string' ? body.start_time : '';
     const endTime = typeof body.end_time === 'string' ? body.end_time : '';
+    const leaveType = body.leave_type;
     const totalDays = Number(body.total_days);
     const details = typeof body.details === 'string' ? body.details.trim() : '';
 
+    if (!['연차', '시간차'].includes(leaveType)) {
+      return jsonResponse({ error: '연차 또는 시간차를 선택해 주세요.' }, 400);
+    }
     if (!isValidDate(startDate) || !isValidDate(endDate) || endDate < startDate) {
       return jsonResponse({ error: '신청 기간을 올바르게 입력해 주세요.' }, 400);
     }
@@ -90,15 +94,32 @@ export async function handleCreateAnnualLeaveRequest(request, supabaseAdmin, env
     if (!TIME_PATTERN.test(startTime) || !TIME_PATTERN.test(endTime)
       || Number(startTime.slice(0, 2)) > 23 || Number(startTime.slice(3, 5)) > 59
       || Number(endTime.slice(0, 2)) > 23 || Number(endTime.slice(3, 5)) > 59
-      || (startDate === endDate && endTime <= startTime)) {
+      || (leaveType === '시간차' && endTime <= startTime)) {
       return jsonResponse({ error: '신청 시작·종료 시간을 올바르게 입력해 주세요.' }, 400);
     }
-    const weekdays = countWeekdays(startDate, endDate);
-    if (startTime !== '09:00' || endTime !== '18:00') {
-      return jsonResponse({ error: '연차 신청은 종일 기준으로 입력해 주세요.' }, 400);
-    }
-    if (!Number.isInteger(totalDays) || totalDays < 1 || totalDays > 31 || totalDays !== weekdays) {
-      return jsonResponse({ error: '연차 일수는 신청 기간 내 주말 제외 평일 수와 같아야 합니다.' }, 400);
+    let hoursUsed = null;
+    if (leaveType === '연차') {
+      const weekdays = countWeekdays(startDate, endDate);
+      if (startTime !== '00:00' || endTime !== '00:00') {
+        return jsonResponse({ error: '종일 연차의 시작·종료 시간은 00:00이어야 합니다.' }, 400);
+      }
+      if (!Number.isInteger(totalDays) || totalDays < 1 || totalDays > 31 || totalDays !== weekdays) {
+        return jsonResponse({ error: '연차 일수는 신청 기간 내 주말 제외 평일 수와 같아야 합니다.' }, 400);
+      }
+    } else {
+      if (startDate !== endDate) {
+        return jsonResponse({ error: '시간차는 시작일과 종료일이 같아야 합니다.' }, 400);
+      }
+      const [startHour, startMinute] = startTime.split(':').map(Number);
+      const [endHour, endMinute] = endTime.split(':').map(Number);
+      const durationMinutes = (endHour * 60 + endMinute) - (startHour * 60 + startMinute);
+      if (durationMinutes < 15 || durationMinutes > 24 * 60 || durationMinutes % 15 !== 0) {
+        return jsonResponse({ error: '시간차는 15분 단위로 0.25~24시간을 신청해 주세요.' }, 400);
+      }
+      if (totalDays !== 1) {
+        return jsonResponse({ error: '시간차의 총 연차 일수 값이 올바르지 않습니다.' }, 400);
+      }
+      hoursUsed = durationMinutes / 60;
     }
     if (details.length > 2000) return jsonResponse({ error: '세부 사항은 2000자 이내로 입력해 주세요.' }, 400);
 
@@ -115,11 +136,13 @@ export async function handleCreateAnnualLeaveRequest(request, supabaseAdmin, env
         user_id: auth.user.id,
         username: auth.profile.name || auth.profile.username || '회원',
         department: member?.work_location || '',
+        leave_type: leaveType,
         start_date: startDate,
         start_time: startTime,
         end_date: endDate,
         end_time: endTime,
         total_days: totalDays,
+        hours_used: hoursUsed,
         details
       })
       .select(REQUEST_FIELDS)
@@ -139,7 +162,7 @@ export async function handleCreateAnnualLeaveRequest(request, supabaseAdmin, env
         supabaseAdmin,
         adminUserIds,
         '새 연차 신청',
-        `${data.username} 님이 ${data.start_date}~${data.end_date} 연차 ${data.total_days}일을 신청했습니다.`,
+        `${data.username} 님이 ${data.start_date}~${data.end_date} ${data.leave_type === '시간차' ? `시간차 ${data.hours_used}시간` : `연차 ${data.total_days}일`}을 신청했습니다.`,
         'annual_leave_request'
       );
       if (notificationError) throw notificationError;
@@ -151,7 +174,7 @@ export async function handleCreateAnnualLeaveRequest(request, supabaseAdmin, env
     if (adminUserIds.length > 0) {
       schedulePushToUsers(context, supabaseAdmin, env, adminUserIds, {
         title: '새 연차 신청',
-        body: `${data.username} 님이 ${data.start_date}~${data.end_date} 연차 ${data.total_days}일을 신청했습니다.`,
+        body: `${data.username} 님이 ${data.start_date}~${data.end_date} ${data.leave_type === '시간차' ? `시간차 ${data.hours_used}시간` : `연차 ${data.total_days}일`}을 신청했습니다.`,
         type: 'annual_leave_request'
       });
     }
@@ -204,7 +227,10 @@ export async function handleReviewAnnualLeaveRequest(request, supabaseAdmin, env
     let notificationWarning = '';
     const reviewerName = auth.profile.name || auth.profile.username || '관리자';
     const title = status === 'approved' ? '연차 신청 승인' : '연차 신청 반려';
-    const notificationBody = `${reviewedRequest.start_date}~${reviewedRequest.end_date} 연차 신청이 ${status === 'approved' ? '승인' : '반려'}되었습니다.${reviewNote ? ` 메모: ${reviewNote}` : ''} (${reviewerName})`;
+    const requestTypeLabel = reviewedRequest.leave_type === '시간차'
+      ? `시간차 ${reviewedRequest.hours_used}시간`
+      : `연차 ${reviewedRequest.total_days}일`;
+    const notificationBody = `${reviewedRequest.start_date}~${reviewedRequest.end_date} ${requestTypeLabel} 신청이 ${status === 'approved' ? '승인' : '반려'}되었습니다.${reviewNote ? ` 메모: ${reviewNote}` : ''} (${reviewerName})`;
     try {
       const notificationError = await notifyUsers(
         supabaseAdmin,
