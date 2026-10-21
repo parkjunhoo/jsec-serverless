@@ -168,9 +168,13 @@ export async function handleUpdateVacation(request, supabaseAdmin, env, context,
     if (error) throw error;
     if (!data) return jsonResponse({ error: '휴무 일정이 수정되지 않았습니다.' }, 409);
 
+    const editorName = authorized.profile.name || authorized.profile.username || '사용자';
+    const editDescription = authorized.user.id === authorized.vacation.user_id
+      ? `${editorName} 님이 본인의`
+      : `관리자 ${editorName} 님이 ${data.username} 님의`;
     schedulePush(context, supabaseAdmin, env, {
       title: '휴무 일정 수정',
-      body: `${data.username} 님의 ${authorized.vacation.date} ${authorized.vacation.leave_type} 휴무를 ${date} ${leaveType}로 변경했습니다.`,
+      body: `${editDescription} ${authorized.vacation.date} ${authorized.vacation.leave_type} 휴무를 ${date} ${leaveType}로 변경했습니다.`,
       type: 'vacation_update'
     });
     return jsonResponse({ success: true, vacation: data });

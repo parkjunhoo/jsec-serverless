@@ -484,9 +484,10 @@ export async function handleBroadcastPush(request, supabaseAdmin, env) {
     return jsonResponse({ error: '제목(1~80자)과 내용(1~500자)을 입력해 주세요.' }, 400);
   }
 
+  const senderName = auth.profile.name || auth.profile.username || '관리자';
   const result = await sendPushToAll(supabaseAdmin, env, {
     title,
-    body: message,
+    body: `${senderName} 님: ${message}`,
     type: 'admin_broadcast'
   });
   return jsonResponse({ success: true, ...result });
