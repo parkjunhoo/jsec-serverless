@@ -20,8 +20,8 @@ async function getAllowanceType(supabaseAdmin, code) {
 async function getAuthorizedEntry(request, supabaseAdmin, entryId) {
   const auth = await authenticateRequest(request, supabaseAdmin);
   if (auth.error) return { response: auth.error };
-  if (auth.profile.role === 'monitor') {
-    return { response: jsonResponse({ error: '본사 모니터링 계정은 수당 기록을 변경할 수 없습니다.' }, 403) };
+  if (auth.profile.role === 'guest' || auth.profile.role === 'monitor') {
+    return { response: jsonResponse({ error: '게스트 계정은 수당 기록을 변경할 수 없습니다.' }, 403) };
   }
 
   const { data: entry, error } = await supabaseAdmin
@@ -141,8 +141,8 @@ export async function handleCreateAllowance(request, supabaseAdmin) {
   try {
     const auth = await authenticateRequest(request, supabaseAdmin);
     if (auth.error) return auth.error;
-    if (auth.profile.role === 'monitor') {
-      return jsonResponse({ error: '본사 모니터링 계정은 수당을 등록할 수 없습니다.' }, 403);
+    if (auth.profile.role === 'guest' || auth.profile.role === 'monitor') {
+      return jsonResponse({ error: '게스트 계정은 수당을 등록할 수 없습니다.' }, 403);
     }
 
     const body = await request.json();

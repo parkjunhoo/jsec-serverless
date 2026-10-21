@@ -29,8 +29,8 @@ function applyVehicleId(query, vehicleId) {
 async function authenticateVehicleWrite(request, supabaseAdmin) {
   const auth = await authenticateRequest(request, supabaseAdmin);
   if (auth.error) return { response: auth.error };
-  if (auth.profile.role === 'monitor') {
-    return { response: jsonResponse({ error: '본사 모니터링 계정은 차량 정보를 변경할 수 없습니다.' }, 403) };
+  if (auth.profile.role === 'guest' || auth.profile.role === 'monitor') {
+    return { response: jsonResponse({ error: '게스트 계정은 차량 정보를 변경할 수 없습니다.' }, 403) };
   }
   return { auth };
 }

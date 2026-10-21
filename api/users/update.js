@@ -14,6 +14,8 @@ const ADMIN_FIELDS = new Set([
   'phone',
   'color'
 ]);
+const GUEST_FIELDS = new Set(['name', 'role', 'status', 'phone']);
+const isGuestRole = role => role === 'guest' || role === 'monitor';
 
 export async function handleUpdateUser(request, supabaseAdmin, userId) {
   try {
@@ -38,7 +40,24 @@ export async function handleUpdateUser(request, supabaseAdmin, userId) {
       return jsonResponse({ error: '본인의 연락처만 수정할 수 있습니다.' }, 403);
     }
 
-    const allowedFields = isAdmin ? ADMIN_FIELDS : new Set(['phone']);
+    let targetRole = auth.profile.role;
+    if (isAdmin) {
+      const { data: targetProfile, error: targetProfileError } = await supabaseAdmin
+        .from('users')
+        .select('role')
+        .eq('id', userId)
+        .maybeSingle();
+      if (targetProfileError) throw targetProfileError;
+      if (!targetProfile) return jsonResponse({ error: '회원을 찾을 수 없습니다.' }, 404);
+      targetRole = targetProfile.role;
+      if (isGuestRole(targetRole) !== (body.role === 'guest')) {
+        return jsonResponse({ error: '게스트 계정의 권한은 게스트로 유지해야 합니다.' }, 400);
+      }
+    }
+
+    const allowedFields = isAdmin
+      ? isGuestRole(targetRole) ? GUEST_FIELDS : ADMIN_FIELDS
+      : new Set(['phone']);
     if (Object.keys(body).length === 0 || Object.keys(body).some(key => !allowedFields.has(key))) {
       return jsonResponse({ error: '수정할 수 없는 회원 정보가 포함되어 있습니다.' }, 400);
     }

@@ -19,6 +19,7 @@ export async function handleCreateUser(request, supabaseAdmin) {
       return jsonResponse({ error: '회원 정보를 입력해 주세요.' }, 400);
     }
     const { username, name, password, role, contract_type, work_location, hire_date, annual_base_date, phone, color } = body;
+    const isGuest = role === 'guest';
 
     if (typeof password !== 'string' || !password.trim()) {
       return jsonResponse({ error: '비밀번호는 필수 입력 항목입니다.' }, 400);
@@ -27,12 +28,12 @@ export async function handleCreateUser(request, supabaseAdmin) {
     const validation = validateUserFields({
       name: realUserName,
       role: role === undefined ? 'user' : role,
-      contract_type: contract_type === undefined ? '정규직' : contract_type,
-      work_location: work_location === undefined ? '지산리조트' : work_location,
-      hire_date: hire_date === undefined ? null : hire_date,
-      annual_base_date: annual_base_date === undefined ? null : annual_base_date,
+      contract_type: isGuest ? '정규직' : contract_type === undefined ? '정규직' : contract_type,
+      work_location: isGuest ? '본사' : work_location === undefined ? '지산리조트' : work_location,
+      hire_date: isGuest ? null : hire_date === undefined ? null : hire_date,
+      annual_base_date: isGuest ? null : annual_base_date === undefined ? null : annual_base_date,
       phone: phone === undefined ? '' : phone,
-      color: color === undefined ? '#38bdf8' : color
+      color: isGuest || color === undefined ? '#38bdf8' : color
     });
     if (validation.error) return jsonResponse({ error: validation.error }, 400);
     const profile = validation.values;
@@ -65,7 +66,9 @@ export async function handleCreateUser(request, supabaseAdmin) {
     }
 
     const userId = authData.user.id; // 생성된 Auth의 UUID
-    const jobTitle = realUserName === '지은석'
+    const jobTitle = isGuest
+      ? '게스트'
+      : realUserName === '지은석'
       ? '소장'
       : realUserName === '김동석'
         ? '부소장'
