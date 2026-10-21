@@ -6,7 +6,7 @@ const FIELD_VALIDATORS = {
     return { value: value.trim() };
   },
   role(value) {
-    if (!['user', 'admin'].includes(value)) {
+    if (!['user', 'admin', 'monitor'].includes(value)) {
       return { error: '사용자 권한 값이 올바르지 않습니다.' };
     }
     return { value };

@@ -35,7 +35,7 @@ export async function handleListItemRequests(request, supabaseAdmin) {
       .select(REQUEST_FIELDS)
       .order('created_at', { ascending: false })
       .limit(500);
-    if (auth.profile.role !== 'admin') query = query.eq('user_id', auth.user.id);
+    if (!['admin', 'monitor'].includes(auth.profile.role)) query = query.eq('user_id', auth.user.id);
 
     const { data, error } = await query;
     if (error) throw error;
@@ -50,6 +50,9 @@ export async function handleCreateItemRequest(request, supabaseAdmin, env, conte
   try {
     const auth = await authenticateRequest(request, supabaseAdmin);
     if (auth.error) return auth.error;
+    if (auth.profile.role === 'monitor') {
+      return jsonResponse({ error: '본사 모니터링 계정은 물품 신청을 등록할 수 없습니다.' }, 403);
+    }
 
     let body;
     try {

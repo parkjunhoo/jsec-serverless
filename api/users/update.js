@@ -19,7 +19,6 @@ export async function handleUpdateUser(request, supabaseAdmin, userId) {
   try {
     const auth = await authenticateRequest(request, supabaseAdmin);
     if (auth.error) return auth.error;
-
     if (!USER_ID_PATTERN.test(userId || '')) {
       return jsonResponse({ error: '수정할 회원 ID가 올바르지 않습니다.' }, 400);
     }

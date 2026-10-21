@@ -5,6 +5,11 @@ import { handleDeleteUser } from './api/users/delete.js';
 import { handleListUsers } from './api/users/list.js';
 import { handleUpdateUser } from './api/users/update.js';
 import {
+  handleCreateVehicle,
+  handleDeleteVehicle,
+  handleUpdateVehicle
+} from './api/vehicles.js';
+import {
   handleCreateItemRequest,
   handleDeleteItemRequest,
   handleListItemRequests,
@@ -91,6 +96,18 @@ export default {
       if (url.pathname.startsWith('/api/users/') && request.method === 'PATCH') {
         const userId = url.pathname.slice('/api/users/'.length);
         return await handleUpdateUser(request, supabaseAdmin, userId);
+      }
+
+      if (url.pathname === '/api/vehicles' && request.method === 'POST') {
+        return await handleCreateVehicle(request, supabaseAdmin);
+      }
+      if (url.pathname.startsWith('/api/vehicles/') && request.method === 'PATCH') {
+        const vehicleId = decodeURIComponent(url.pathname.slice('/api/vehicles/'.length));
+        return await handleUpdateVehicle(request, supabaseAdmin, vehicleId);
+      }
+      if (url.pathname.startsWith('/api/vehicles/') && request.method === 'DELETE') {
+        const vehicleId = decodeURIComponent(url.pathname.slice('/api/vehicles/'.length));
+        return await handleDeleteVehicle(request, supabaseAdmin, vehicleId);
       }
 
       if (url.pathname === '/api/item-requests' && request.method === 'GET') {

@@ -40,6 +40,9 @@ async function getTargetMember(supabaseAdmin, userId) {
 async function getVacationForAuthorizedUser(request, supabaseAdmin, vacationId) {
   const auth = await authenticateRequest(request, supabaseAdmin);
   if (auth.error) return auth;
+  if (auth.profile.role === 'monitor') {
+    return { response: jsonResponse({ error: '본사 모니터링 계정은 휴무 일정을 변경할 수 없습니다.' }, 403) };
+  }
 
   const { data: vacation, error } = await supabaseAdmin
     .from('vacations')
@@ -67,6 +70,9 @@ export async function handleCreateVacation(request, supabaseAdmin, env, context)
   try {
     const auth = await authenticateRequest(request, supabaseAdmin);
     if (auth.error) return auth.error;
+    if (auth.profile.role === 'monitor') {
+      return jsonResponse({ error: '본사 모니터링 계정은 휴무 일정을 등록할 수 없습니다.' }, 403);
+    }
 
     const body = await request.json();
     const date = typeof body.date === 'string' ? body.date : '';
