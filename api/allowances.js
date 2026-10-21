@@ -86,9 +86,9 @@ export async function handleListAllowances(request, supabaseAdmin) {
       return jsonResponse({ error: '조회할 날짜 범위가 올바르지 않습니다.' }, 400);
     }
 
-        let query = supabaseAdmin
-          .from('allowance_entries')
-          .select('id, user_id, username, type_code, type_label, work_date, shift, slot_no, unit_amount, note, created_at, updated_at')
+    let query = supabaseAdmin
+      .from('allowance_entries')
+      .select('id, user_id, username, type_code, type_label, work_date, shift, slot_no, unit_amount, note, created_at, updated_at')
       .gte('work_date', start)
       .lte('work_date', end)
       .order('work_date', { ascending: false })
@@ -101,6 +101,8 @@ export async function handleListAllowances(request, supabaseAdmin) {
     if (auth.profile.role === 'admin') {
       const userId = url.searchParams.get('user_id');
       if (userId) query = query.eq('user_id', userId);
+    } else if (auth.profile.role !== 'guest' && auth.profile.role !== 'monitor') {
+      query = query.eq('user_id', auth.user.id);
     }
 
     const { data, error } = await query;
@@ -122,6 +124,12 @@ export async function handleListAllowanceAvailability(request, supabaseAdmin) {
     const end = url.searchParams.get('end') || '';
     if (!isValidDate(start) || !isValidDate(end) || start > end) {
       return jsonResponse({ error: '조회할 날짜 범위가 올바르지 않습니다.' }, 400);
+    }
+    if (auth.profile.role !== 'admin'
+      && auth.profile.role !== 'guest'
+      && auth.profile.role !== 'monitor'
+      && start !== end) {
+      return jsonResponse({ error: '다른 직원의 등록 정보는 선택한 날짜에만 확인할 수 있습니다.' }, 403);
     }
 
     const { data, error } = await supabaseAdmin
