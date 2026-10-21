@@ -108,9 +108,13 @@ export async function handleCreateVacation(request, supabaseAdmin, env, context)
       .single();
     if (error) throw error;
 
+    const creatorName = auth.profile.name || auth.profile.username || '사용자';
+    const createDescription = auth.user.id === member.id
+      ? `${creatorName} 님이 본인의`
+      : `관리자 ${creatorName} 님이 ${vacation.username} 님의`;
     schedulePush(context, supabaseAdmin, env, {
       title: '휴무 일정 등록',
-      body: `${vacation.username} 님이 ${date} ${leaveType} 휴무를 추가했습니다.`,
+      body: `${createDescription} ${date} ${leaveType} 일정을 등록했습니다.`,
       type: 'vacation_create'
     });
     return jsonResponse({ success: true, vacation: data });
@@ -174,7 +178,7 @@ export async function handleUpdateVacation(request, supabaseAdmin, env, context,
       : `관리자 ${editorName} 님이 ${data.username} 님의`;
     schedulePush(context, supabaseAdmin, env, {
       title: '휴무 일정 수정',
-      body: `${editDescription} ${authorized.vacation.date} ${authorized.vacation.leave_type} 휴무를 ${date} ${leaveType}로 변경했습니다.`,
+      body: `${editDescription} ${authorized.vacation.date} ${authorized.vacation.leave_type} 일정을 ${date} ${leaveType}로 변경했습니다.`,
       type: 'vacation_update'
     });
     return jsonResponse({ success: true, vacation: data });
