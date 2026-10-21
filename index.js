@@ -17,6 +17,7 @@ import {
 } from './api/item-requests.js';
 import {
   handleCreateVacation,
+  handleBulkCreateVacations,
   handleDeleteVacation,
   handleListVacations,
   handleUpdateVacation
@@ -161,6 +162,9 @@ export default {
       }
       if (url.pathname === '/api/vacations/create' && request.method === 'POST') {
         return await handleCreateVacation(request, supabaseAdmin, env, ctx);
+      }
+      if (url.pathname === '/api/vacations/bulk' && request.method === 'POST') {
+        return await handleBulkCreateVacations(request, supabaseAdmin, env, ctx);
       }
       if (url.pathname.startsWith('/api/vacations/delete/') && request.method === 'DELETE') {
         const vacationId = url.pathname.slice('/api/vacations/delete/'.length);

@@ -130,6 +130,68 @@ export async function handleCreateVacation(request, supabaseAdmin, env, context)
   }
 }
 
+export async function handleBulkCreateVacations(request, supabaseAdmin, env, context) {
+  try {
+    const auth = await authenticateRequest(request, supabaseAdmin);
+    if (auth.error) return auth.error;
+    if (auth.profile.role === 'guest' || auth.profile.role === 'monitor') {
+      return jsonResponse({ error: '게스트 계정은 휴무 일정을 등록할 수 없습니다.' }, 403);
+    }
+
+    const body = await request.json();
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return jsonResponse({ error: '요청 형식이 올바르지 않습니다.' }, 400);
+    }
+    const dates = body.dates;
+    if (!Array.isArray(dates) || dates.length === 0 || dates.length > 31
+      || dates.some(date => typeof date !== 'string' || !isValidDate(date))
+      || new Set(dates).size !== dates.length
+      || new Set(dates.map(date => date.slice(0, 7))).size !== 1) {
+      return jsonResponse({ error: '같은 달의 서로 다른 날짜를 1~31개 선택해 주세요.' }, 400);
+    }
+
+    const userId = auth.profile.role === 'admin' && typeof body.user_id === 'string'
+      ? body.user_id
+      : auth.user.id;
+    const member = await getTargetMember(supabaseAdmin, userId);
+    if (!member) return jsonResponse({ error: '대상 팀원을 찾을 수 없습니다.' }, 404);
+
+    const memo = typeof body.memo === 'string' ? body.memo.trim() : '';
+    if (memo.length > 500) {
+      return jsonResponse({ error: '비고는 500자 이하로 입력해 주세요.' }, 400);
+    }
+
+    const vacations = dates.map(date => ({
+      user_id: member.id,
+      username: member.name || member.username,
+      date,
+      leave_type: '휴무',
+      time_detail: '종일',
+      hours_used: null,
+      memo
+    }));
+    const { data, error } = await supabaseAdmin
+      .from('vacations')
+      .insert(vacations)
+      .select('*');
+    if (error) throw error;
+
+    const creatorName = auth.profile.name || auth.profile.username || '사용자';
+    const createDescription = auth.user.id === member.id
+      ? `${creatorName} 님이 본인의`
+      : `관리자 ${creatorName} 님이 ${vacations[0].username} 님의`;
+    schedulePush(context, supabaseAdmin, env, {
+      title: '휴무 일정 일괄 등록',
+      body: `${createDescription} 휴무 ${data.length}건을 등록했습니다.`,
+      type: 'vacation_create'
+    });
+    return jsonResponse({ success: true, count: data.length, vacations: data });
+  } catch (error) {
+    console.error('휴무 일괄 등록 오류:', error);
+    return jsonResponse({ error: error.message }, 500);
+  }
+}
+
 export async function handleUpdateVacation(request, supabaseAdmin, env, context, vacationId) {
   try {
     const authorized = await getVacationForAuthorizedUser(request, supabaseAdmin, vacationId);
