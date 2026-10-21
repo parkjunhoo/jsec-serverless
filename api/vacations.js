@@ -200,9 +200,13 @@ export async function handleDeleteVacation(request, supabaseAdmin, env, context,
       .eq('id', vacationId);
     if (error) throw error;
 
+    const editorName = authorized.profile.name || authorized.profile.username || '사용자';
+    const deleteDescription = authorized.user.id === authorized.vacation.user_id
+      ? `${editorName} 님이 본인의`
+      : `관리자 ${editorName} 님이 ${authorized.vacation.username} 님의`;
     schedulePush(context, supabaseAdmin, env, {
       title: '휴무 일정 삭제',
-      body: `${authorized.vacation.username} 님의 ${authorized.vacation.date} ${authorized.vacation.leave_type} 휴무를 삭제했습니다.`,
+      body: `${deleteDescription} ${authorized.vacation.date} ${authorized.vacation.leave_type} 일정을 삭제했습니다.`,
       type: 'vacation_delete'
     });
     return jsonResponse({ success: true, message: '휴무가 삭제되었습니다.' });
