@@ -4,6 +4,14 @@ CREATE TABLE IF NOT EXISTS public.annual_leave_accrual_settings (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS public.annual_leave_employee_deductions (
+  user_id uuid NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  service_year integer NOT NULL CHECK (service_year BETWEEN 1 AND 10),
+  deduction_days integer NOT NULL DEFAULT 0 CHECK (deduction_days BETWEEN 0 AND 12),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, service_year)
+);
+
 INSERT INTO public.annual_leave_accrual_settings (service_year, additional_days)
 SELECT service_year, CASE WHEN service_year = 1 THEN 0 ELSE service_year + 1 END
 FROM generate_series(1, 10) AS years(service_year)
@@ -12,6 +20,9 @@ ON CONFLICT (service_year) DO NOTHING;
 ALTER TABLE public.annual_leave_accrual_settings ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON TABLE public.annual_leave_accrual_settings FROM anon, authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.annual_leave_accrual_settings TO service_role;
+ALTER TABLE public.annual_leave_employee_deductions ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE public.annual_leave_employee_deductions FROM anon, authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.annual_leave_employee_deductions TO service_role;
 
 CREATE OR REPLACE FUNCTION public.create_annual_leave_request_with_balance(
   p_user_id uuid,
@@ -37,6 +48,7 @@ DECLARE
   v_hours_per_day integer;
   v_today date := timezone('Asia/Seoul', now())::date;
   v_service_year integer;
+  base_deduction_days integer;
   cycle_start date;
   cycle_end date;
   entitled_days numeric;
@@ -69,11 +81,19 @@ BEGIN
     RAISE EXCEPTION '연차 기준 기간(% ~ %) 안에서 신청해 주세요.', cycle_start, cycle_end;
   END IF;
 
-  SELECT 12 + COALESCE((
+  SELECT COALESCE((
+    SELECT deduction_days
+    FROM public.annual_leave_employee_deductions
+    WHERE user_id = p_user_id
+      AND service_year = LEAST(v_service_year, 10)
+  ), 0)
+  INTO base_deduction_days;
+
+  SELECT GREATEST(0, 12 + COALESCE((
     SELECT additional_days
     FROM public.annual_leave_accrual_settings
     WHERE annual_leave_accrual_settings.service_year = LEAST(v_service_year, 10)
-  ), 0)
+  ), 0) - base_deduction_days)
   INTO entitled_days;
 
   SELECT COALESCE(SUM(

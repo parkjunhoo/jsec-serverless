@@ -73,7 +73,15 @@ async function loadSettings(supabaseAdmin) {
   return data || [];
 }
 
-async function buildBalances(supabaseAdmin, members, settings, asOfDate) {
+async function loadEmployeeDeductions(supabaseAdmin) {
+  const { data, error } = await supabaseAdmin
+    .from('annual_leave_employee_deductions')
+    .select('user_id, service_year, deduction_days');
+  if (error) throw error;
+  return data || [];
+}
+
+async function buildBalances(supabaseAdmin, members, settings, deductions, asOfDate) {
   const today = asOfDate;
   const eligibleMembers = members.filter(member =>
     member.annual_base_date && member.annual_base_date <= today
@@ -126,6 +134,10 @@ async function buildBalances(supabaseAdmin, members, settings, asOfDate) {
   if (requestsResult.error) throw requestsResult.error;
 
   const settingsByYear = new Map(settings.map(item => [Number(item.service_year), Number(item.additional_days)]));
+  const deductionsByEmployeeYear = new Map(deductions.map(item => [
+    `${item.user_id}:${item.service_year}`,
+    Number(item.deduction_days)
+  ]));
   return members.map(member => {
     const period = periods.get(member.id);
     if (!period) {
@@ -148,7 +160,8 @@ async function buildBalances(supabaseAdmin, members, settings, asOfDate) {
       };
     }
     const additionalDays = settingsByYear.get(Math.min(period.serviceYear, MAX_SERVICE_YEAR)) || 0;
-    const entitledDays = BASE_ANNUAL_DAYS + additionalDays;
+    const deductionDays = deductionsByEmployeeYear.get(`${member.id}:${Math.min(period.serviceYear, MAX_SERVICE_YEAR)}`) || 0;
+    const entitledDays = Math.max(0, BASE_ANNUAL_DAYS + additionalDays - deductionDays);
     const hoursPerDay = hoursPerAnnualLeaveDay(member.work_location);
     const usedDays = (vacationsResult.data || [])
       .filter(item => item.user_id === member.id && item.date >= period.startDate && item.date <= period.endDate)
@@ -165,6 +178,7 @@ async function buildBalances(supabaseAdmin, members, settings, asOfDate) {
       cycle_start: period.startDate,
       cycle_end: period.endDate,
       base_days: BASE_ANNUAL_DAYS,
+      deduction_days: deductionDays,
       additional_days: additionalDays,
       hours_per_day: hoursPerDay,
       entitled_days: entitledDays,
@@ -197,7 +211,10 @@ export async function handleGetAnnualLeave(request, supabaseAdmin) {
       return jsonResponse({ error: '연차 산정 기준일이 올바르지 않습니다.' }, 400);
     }
 
-    const settings = await loadSettings(supabaseAdmin);
+    const [settings, deductions] = await Promise.all([
+      loadSettings(supabaseAdmin),
+      loadEmployeeDeductions(supabaseAdmin)
+    ]);
     let membersQuery = supabaseAdmin
       .from('users')
       .select('id, name, username, role, work_location, annual_base_date, status')
@@ -209,11 +226,60 @@ export async function handleGetAnnualLeave(request, supabaseAdmin) {
     const { data: members, error } = await membersQuery;
     if (error) throw error;
 
-    const balances = await buildBalances(supabaseAdmin, members || [], settings, asOfDate);
-    return jsonResponse({ balances, settings, isAdmin: auth.profile.role === 'admin', asOfDate });
+    const balances = await buildBalances(supabaseAdmin, members || [], settings, deductions, asOfDate);
+    return jsonResponse({
+      balances,
+      settings,
+      employeeDeductions: auth.profile.role === 'admin' ? deductions : [],
+      isAdmin: auth.profile.role === 'admin',
+      asOfDate
+    });
   } catch (error) {
     console.error('연차 현황 조회 오류:', error);
     return jsonResponse({ error: error.message || '연차 현황을 불러오지 못했습니다.' }, 500);
+  }
+}
+
+export async function handleUpdateEmployeeAnnualLeaveDeductions(request, supabaseAdmin) {
+  try {
+    const auth = await authenticateRequest(request, supabaseAdmin);
+    if (auth.error) return auth.error;
+    if (auth.profile.role !== 'admin') {
+      return jsonResponse({ error: '관리자만 직원별 연차 차감일수를 설정할 수 있습니다.' }, 403);
+    }
+
+    let body;
+    try {
+      body = await request.json();
+    } catch {
+      return jsonResponse({ error: '설정 내용이 올바른 JSON이 아닙니다.' }, 400);
+    }
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(body?.user_id || '')
+      || !Array.isArray(body?.deductions)
+      || body.deductions.length !== MAX_SERVICE_YEAR) {
+      return jsonResponse({ error: '직원과 1~10년차 차감일수를 모두 입력해 주세요.' }, 400);
+    }
+
+    const deductions = body.deductions.map((item, index) => ({
+      user_id: body.user_id,
+      service_year: index + 1,
+      deduction_days: Number(item?.deduction_days)
+    }));
+    if (deductions.some(item =>
+      !Number.isInteger(item.deduction_days) || item.deduction_days < 0 || item.deduction_days > BASE_ANNUAL_DAYS
+    )) {
+      return jsonResponse({ error: `기본연차 차감일수는 0~${BASE_ANNUAL_DAYS}일 사이의 정수로 입력해 주세요.` }, 400);
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from('annual_leave_employee_deductions')
+      .upsert(deductions, { onConflict: 'user_id,service_year' })
+      .select('user_id, service_year, deduction_days');
+    if (error) throw error;
+    return jsonResponse({ success: true, deductions: data || [] });
+  } catch (error) {
+    console.error('직원별 연차 차감 설정 저장 오류:', error);
+    return jsonResponse({ error: error.message || '직원별 연차 차감 설정을 저장하지 못했습니다.' }, 500);
   }
 }
 
