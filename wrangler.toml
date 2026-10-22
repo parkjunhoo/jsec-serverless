@@ -5,3 +5,7 @@ compatibility_date = "2026-01-01"
 [[r2_buckets]]
 binding = "MEAL_PLAN_IMAGES"
 bucket_name = "jsec-meal-image"
+
+[[r2_buckets]]
+binding = "CORPCARD_RECEIPTS"
+bucket_name = "jsec-corpcard-receipt"

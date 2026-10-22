@@ -34,6 +34,13 @@ import {
   handleSaveMealPlan
 } from './api/meal-plan.js';
 import {
+  handleCreateCorporateCard,
+  handleDeleteCorporateCard,
+  handleGetCorporateCardReceipt,
+  handleListCorporateCards,
+  handleUpdateCorporateCard
+} from './api/corporate-cards.js';
+import {
   handleCreateAllowance,
   handleDeleteAllowance,
   handleListAllowanceAvailability,
@@ -248,6 +255,30 @@ export default {
       }
       if (url.pathname === '/api/meal-plan/image' && request.method === 'GET') {
         return await handleGetMealPlanImage(request, supabaseAdmin, env);
+      }
+
+      if (url.pathname === '/api/corporate-cards' && request.method === 'GET') {
+        return await handleListCorporateCards(request, supabaseAdmin);
+      }
+      if (url.pathname === '/api/corporate-cards' && request.method === 'POST') {
+        return await handleCreateCorporateCard(request, supabaseAdmin, env, ctx);
+      }
+      if (url.pathname.startsWith('/api/corporate-cards/') && request.method === 'PATCH') {
+        const id = decodeURIComponent(url.pathname.slice('/api/corporate-cards/'.length));
+        return await handleUpdateCorporateCard(request, supabaseAdmin, env, ctx, id);
+      }
+      if (url.pathname.startsWith('/api/corporate-cards/') && request.method === 'DELETE') {
+        const id = decodeURIComponent(url.pathname.slice('/api/corporate-cards/'.length));
+        return await handleDeleteCorporateCard(request, supabaseAdmin, env, ctx, id);
+      }
+      const corporateCardReceiptMatch = url.pathname.match(/^\/api\/corporate-cards\/([0-9a-f-]+)\/receipt$/i);
+      if (corporateCardReceiptMatch && request.method === 'GET') {
+        return await handleGetCorporateCardReceipt(
+          request,
+          supabaseAdmin,
+          env,
+          corporateCardReceiptMatch[1]
+        );
       }
 
       // 8. 404 경로 처리
