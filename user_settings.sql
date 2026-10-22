@@ -9,9 +9,6 @@ CREATE TABLE IF NOT EXISTS public.user_settings (
 ALTER TABLE public.user_settings
   ADD COLUMN IF NOT EXISTS large_text_mode boolean NOT NULL DEFAULT false;
 
-ALTER TABLE public.user_settings
-  ALTER COLUMN theme SET DEFAULT 'light';
-
 ALTER TABLE public.user_settings ENABLE ROW LEVEL SECURITY;
 
 REVOKE ALL ON TABLE public.user_settings FROM anon;
