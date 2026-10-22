@@ -32,7 +32,9 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 DECLARE
-  member_hire_date date;
+  member_annual_base_date date;
+  member_work_location text;
+  v_hours_per_day integer;
   v_today date := timezone('Asia/Seoul', now())::date;
   v_service_year integer;
   cycle_start date;
@@ -43,20 +45,25 @@ DECLARE
   requested_days numeric;
   created_request public.annual_leave_requests%ROWTYPE;
 BEGIN
-  SELECT hire_date
-  INTO member_hire_date
+  SELECT annual_base_date, work_location
+  INTO member_annual_base_date, member_work_location
   FROM public.users
   WHERE id = p_user_id
     AND COALESCE(status, '재직') <> '퇴직'
   FOR UPDATE;
 
-  IF NOT FOUND OR member_hire_date IS NULL OR member_hire_date > v_today THEN
-    RAISE EXCEPTION '연차 잔여 일수를 계산할 입사일이 등록되어 있지 않습니다. 관리자에게 입사일 등록을 요청해 주세요.';
+  IF NOT FOUND OR member_annual_base_date IS NULL OR member_annual_base_date > v_today THEN
+    RAISE EXCEPTION '연차 잔여 일수를 계산할 연차 기준일이 등록되어 있지 않습니다. 관리자에게 연차 기준일 등록을 요청해 주세요.';
   END IF;
+  v_hours_per_day := CASE
+    WHEN COALESCE(member_work_location, '') ILIKE '%골프장%'
+      OR COALESCE(member_work_location, '') ILIKE '%스키장%' THEN 12
+    ELSE 8
+  END;
 
-  v_service_year := GREATEST(1, EXTRACT(YEAR FROM age(v_today, member_hire_date))::integer + 1);
-  cycle_start := member_hire_date + make_interval(years => v_service_year - 1);
-  cycle_end := member_hire_date + make_interval(years => v_service_year) - 1;
+  v_service_year := GREATEST(1, EXTRACT(YEAR FROM age(v_today, member_annual_base_date))::integer + 1);
+  cycle_start := member_annual_base_date + make_interval(years => v_service_year - 1);
+  cycle_end := member_annual_base_date + make_interval(years => v_service_year) - 1;
 
   IF p_start_date < cycle_start OR p_end_date > cycle_end THEN
     RAISE EXCEPTION '연차 기준 기간(% ~ %) 안에서 신청해 주세요.', cycle_start, cycle_end;
@@ -72,7 +79,7 @@ BEGIN
   SELECT COALESCE(SUM(
     CASE
       WHEN leave_type = '연차' THEN 1
-      WHEN leave_type = '시간차' THEN COALESCE(hours_used, 0) / 8
+      WHEN leave_type = '시간차' THEN COALESCE(hours_used, 0) / v_hours_per_day
       ELSE 0
     END
   ), 0)
@@ -84,7 +91,7 @@ BEGIN
   SELECT COALESCE(SUM(
     CASE
       WHEN leave_type = '연차' THEN total_days
-      WHEN leave_type = '시간차' THEN COALESCE(hours_used, 0) / 8
+      WHEN leave_type = '시간차' THEN COALESCE(hours_used, 0) / v_hours_per_day
       ELSE 0
     END
   ), 0)
@@ -97,7 +104,7 @@ BEGIN
 
   requested_days := CASE
     WHEN p_leave_type = '연차' THEN p_total_days
-    ELSE COALESCE(p_hours_used, 0) / 8
+    ELSE COALESCE(p_hours_used, 0) / v_hours_per_day
   END;
 
   IF used_days + pending_days + requested_days > entitled_days THEN

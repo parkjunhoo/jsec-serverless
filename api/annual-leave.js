@@ -7,8 +7,8 @@ function getKoreaDate() {
   return new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
-function anniversaryDate(hireDate, years) {
-  const [year, month, day] = hireDate.split('-').map(Number);
+function anniversaryDate(baseDate, years) {
+  const [year, month, day] = baseDate.split('-').map(Number);
   const targetYear = year + years;
   const lastDay = new Date(Date.UTC(targetYear, month, 0)).getUTCDate();
   return `${targetYear}-${String(month).padStart(2, '0')}-${String(Math.min(day, lastDay)).padStart(2, '0')}`;
@@ -25,13 +25,13 @@ function countWeekdays(startDate, endDate) {
   return count;
 }
 
-function getServicePeriod(hireDate, today) {
-  if (!hireDate || hireDate > today) return null;
-  let serviceYear = Number(today.slice(0, 4)) - Number(hireDate.slice(0, 4)) + 1;
-  while (serviceYear > 1 && anniversaryDate(hireDate, serviceYear - 1) > today) serviceYear -= 1;
-  while (anniversaryDate(hireDate, serviceYear) <= today) serviceYear += 1;
-  const startDate = anniversaryDate(hireDate, serviceYear - 1);
-  const endDate = new Date(`${anniversaryDate(hireDate, serviceYear)}T00:00:00Z`);
+function getServicePeriod(baseDate, today) {
+  if (!baseDate || baseDate > today) return null;
+  let serviceYear = Number(today.slice(0, 4)) - Number(baseDate.slice(0, 4)) + 1;
+  while (serviceYear > 1 && anniversaryDate(baseDate, serviceYear - 1) > today) serviceYear -= 1;
+  while (anniversaryDate(baseDate, serviceYear) <= today) serviceYear += 1;
+  const startDate = anniversaryDate(baseDate, serviceYear - 1);
+  const endDate = new Date(`${anniversaryDate(baseDate, serviceYear)}T00:00:00Z`);
   endDate.setUTCDate(endDate.getUTCDate() - 1);
   return {
     serviceYear,
@@ -40,21 +40,26 @@ function getServicePeriod(hireDate, today) {
   };
 }
 
-function getUsedDays(entry) {
+function hoursPerAnnualLeaveDay(workLocation) {
+  const location = String(workLocation || '').toLowerCase();
+  return location.includes('골프장') || location.includes('스키장') ? 12 : 8;
+}
+
+function getUsedDays(entry, hoursPerDay) {
   if (entry.leave_type === '연차') return 1;
   if (entry.leave_type === '시간차') {
     const hours = Number(entry.hours_used);
-    return Number.isFinite(hours) ? hours / 8 : 0;
+    return Number.isFinite(hours) ? hours / hoursPerDay : 0;
   }
   return 0;
 }
 
-function countRequestedDays(request, startDate, endDate) {
+function countRequestedDays(request, startDate, endDate, hoursPerDay) {
   const first = request.start_date < startDate ? startDate : request.start_date;
   const last = request.end_date > endDate ? endDate : request.end_date;
   if (request.leave_type === '연차') return countWeekdays(first, last);
   if (request.leave_type === '시간차' && request.start_date >= startDate && request.start_date <= endDate) {
-    return Number(request.hours_used || 0) / 8;
+    return Number(request.hours_used || 0) / hoursPerDay;
   }
   return 0;
 }
@@ -70,18 +75,21 @@ async function loadSettings(supabaseAdmin) {
 
 async function buildBalances(supabaseAdmin, members, settings) {
   const today = getKoreaDate();
-  const eligibleMembers = members.filter(member => member.hire_date && member.hire_date <= today);
+  const eligibleMembers = members.filter(member =>
+    member.annual_base_date && member.annual_base_date <= today
+  );
   if (!eligibleMembers.length) {
     return members.map(member => ({
       user_id: member.id,
       name: member.name || member.username || '이름 없음',
       department: member.work_location || '',
-      hire_date: member.hire_date,
+      annual_base_date: member.annual_base_date,
       service_year: null,
       cycle_start: null,
       cycle_end: null,
       base_days: BASE_ANNUAL_DAYS,
       additional_days: 0,
+      hours_per_day: hoursPerAnnualLeaveDay(member.work_location),
       entitled_days: null,
       used_days: 0,
       pending_days: 0,
@@ -92,7 +100,7 @@ async function buildBalances(supabaseAdmin, members, settings) {
 
   const periods = new Map(eligibleMembers.map(member => [
     member.id,
-    getServicePeriod(member.hire_date, today)
+    getServicePeriod(member.annual_base_date, today)
   ]));
   const cycleStart = [...periods.values()].reduce((start, period) =>
     period.startDate < start ? period.startDate : start, [...periods.values()][0].startDate);
@@ -125,12 +133,13 @@ async function buildBalances(supabaseAdmin, members, settings) {
         user_id: member.id,
         name: member.name || member.username || '이름 없음',
         department: member.work_location || '',
-        hire_date: member.hire_date,
+        annual_base_date: member.annual_base_date,
         service_year: null,
         cycle_start: null,
         cycle_end: null,
         base_days: BASE_ANNUAL_DAYS,
         additional_days: 0,
+        hours_per_day: hoursPerAnnualLeaveDay(member.work_location),
         entitled_days: null,
         used_days: 0,
         pending_days: 0,
@@ -140,22 +149,24 @@ async function buildBalances(supabaseAdmin, members, settings) {
     }
     const additionalDays = settingsByYear.get(Math.min(period.serviceYear, MAX_SERVICE_YEAR)) || 0;
     const entitledDays = BASE_ANNUAL_DAYS + additionalDays;
+    const hoursPerDay = hoursPerAnnualLeaveDay(member.work_location);
     const usedDays = (vacationsResult.data || [])
       .filter(item => item.user_id === member.id && item.date >= period.startDate && item.date <= period.endDate)
-      .reduce((sum, item) => sum + getUsedDays(item), 0);
+      .reduce((sum, item) => sum + getUsedDays(item, hoursPerDay), 0);
     const pendingDays = (requestsResult.data || [])
       .filter(item => item.user_id === member.id)
-      .reduce((sum, item) => sum + countRequestedDays(item, period.startDate, period.endDate), 0);
+      .reduce((sum, item) => sum + countRequestedDays(item, period.startDate, period.endDate, hoursPerDay), 0);
     return {
       user_id: member.id,
       name: member.name || member.username || '이름 없음',
       department: member.work_location || '',
-      hire_date: member.hire_date,
+      annual_base_date: member.annual_base_date,
       service_year: period.serviceYear,
       cycle_start: period.startDate,
       cycle_end: period.endDate,
       base_days: BASE_ANNUAL_DAYS,
       additional_days: additionalDays,
+      hours_per_day: hoursPerDay,
       entitled_days: entitledDays,
       used_days: Number(usedDays.toFixed(2)),
       pending_days: Number(pendingDays.toFixed(2)),
@@ -176,7 +187,7 @@ export async function handleGetAnnualLeave(request, supabaseAdmin) {
     const settings = await loadSettings(supabaseAdmin);
     let membersQuery = supabaseAdmin
       .from('users')
-      .select('id, name, username, role, work_location, hire_date, status')
+      .select('id, name, username, role, work_location, annual_base_date, status')
       .neq('role', 'guest')
       .neq('role', 'monitor')
       .or('status.is.null,status.neq.퇴직')
