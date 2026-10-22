@@ -1,7 +1,8 @@
 import { authenticateRequest, jsonResponse } from './push.js';
 
 const MAX_IMAGE_BYTES = 1024 * 1024;
-const MEAL_PLAN_FIELDS = 'week_start, size_bytes, uploaded_by_name, uploaded_at';
+const MEAL_PLAN_FIELDS = 'week_start, venue, size_bytes, uploaded_by_name, uploaded_at';
+const MEAL_PLAN_VENUES = new Set(['golf', 'ski']);
 
 function isMondayDate(value) {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
@@ -9,6 +10,11 @@ function isMondayDate(value) {
   return !Number.isNaN(date.getTime()) &&
     date.toISOString().slice(0, 10) === value &&
     date.getUTCDay() === 1;
+}
+
+function getVenue(request) {
+  const venue = new URL(request.url).searchParams.get('venue') || 'golf';
+  return MEAL_PLAN_VENUES.has(venue) ? venue : null;
 }
 
 async function readImageBody(request) {
@@ -64,11 +70,14 @@ export async function handleGetMealPlan(request, supabaseAdmin) {
     if (!isMondayDate(weekStart)) {
       return jsonResponse({ error: '조회할 주의 월요일 날짜가 올바르지 않습니다.' }, 400);
     }
+    const venue = getVenue(request);
+    if (!venue) return jsonResponse({ error: '식단표 구분이 올바르지 않습니다.' }, 400);
 
     const { data, error } = await supabaseAdmin
       .from('meal_plans')
       .select(MEAL_PLAN_FIELDS)
       .eq('week_start', weekStart)
+      .eq('venue', venue)
       .maybeSingle();
     if (error) throw error;
     if (!data) return jsonResponse({ mealPlan: null });
@@ -92,11 +101,14 @@ export async function handleGetMealPlanImage(request, supabaseAdmin, env) {
     if (!isMondayDate(weekStart)) {
       return jsonResponse({ error: '조회할 주의 월요일 날짜가 올바르지 않습니다.' }, 400);
     }
+    const venue = getVenue(request);
+    if (!venue) return jsonResponse({ error: '식단표 구분이 올바르지 않습니다.' }, 400);
 
     const { data, error } = await supabaseAdmin
       .from('meal_plans')
       .select('object_key')
       .eq('week_start', weekStart)
+      .eq('venue', venue)
       .maybeSingle();
     if (error) throw error;
     if (!data) return jsonResponse({ error: '해당 주의 식단표 사진이 없습니다.' }, 404);
@@ -129,6 +141,8 @@ export async function handleSaveMealPlan(request, supabaseAdmin, env, context) {
     if (!isMondayDate(weekStart)) {
       return jsonResponse({ error: '업로드할 주의 월요일 날짜가 올바르지 않습니다.' }, 400);
     }
+    const venue = getVenue(request);
+    if (!venue) return jsonResponse({ error: '식단표 구분이 올바르지 않습니다.' }, 400);
     if ((request.headers.get('Content-Type') || '').split(';', 1)[0].trim().toLowerCase() !== 'image/jpeg') {
       return jsonResponse({ error: '압축된 JPEG 사진만 업로드할 수 있습니다.' }, 415);
     }
@@ -149,10 +163,11 @@ export async function handleSaveMealPlan(request, supabaseAdmin, env, context) {
       .from('meal_plans')
       .select('object_key')
       .eq('week_start', weekStart)
+      .eq('venue', venue)
       .maybeSingle();
     if (lookupError) throw lookupError;
 
-    const objectKey = `meal-plans/${weekStart}/${crypto.randomUUID()}.jpg`;
+    const objectKey = `meal-plans/${venue}/${weekStart}/${crypto.randomUUID()}.jpg`;
     await env.MEAL_PLAN_IMAGES.put(objectKey, image, {
       httpMetadata: {
         contentType: 'image/jpeg',
@@ -166,12 +181,13 @@ export async function handleSaveMealPlan(request, supabaseAdmin, env, context) {
         .from('meal_plans')
         .upsert({
           week_start: weekStart,
+          venue,
           object_key: objectKey,
           size_bytes: image.byteLength,
           uploaded_by: auth.user.id,
           uploaded_by_name: auth.profile.name || auth.profile.username || '회원',
           uploaded_at: new Date().toISOString()
-        }, { onConflict: 'week_start' })
+        }, { onConflict: 'week_start,venue' })
         .select(MEAL_PLAN_FIELDS)
         .single();
       if (error) throw error;

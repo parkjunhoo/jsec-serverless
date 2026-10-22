@@ -34,21 +34,6 @@ import {
   handleSaveMealPlan
 } from './api/meal-plan.js';
 import {
-  handleCreateCorporateCard,
-  handleDeleteCorporateCard,
-  handleGetCorporateCardReceipt,
-  handleListCorporateCards,
-  handleUpdateCorporateCard
-} from './api/corporate-cards.js';
-import {
-  handleCreateAllowance,
-  handleDeleteAllowance,
-  handleListAllowanceAvailability,
-  handleListAllowanceTypes,
-  handleListAllowances,
-  handleUpdateAllowance
-} from './api/allowances.js';
-import {
   handleCreateAnnualLeaveRequest,
   handleDeleteAnnualLeaveRequest,
   handleListAnnualLeaveRequests,
@@ -82,6 +67,18 @@ export default {
       return new Response(null, {
         status: 204,
         headers: corsHeaders,
+      });
+    }
+
+    if (
+      url.pathname === '/api/allowances' ||
+      url.pathname.startsWith('/api/allowances/') ||
+      url.pathname === '/api/corporate-cards' ||
+      url.pathname.startsWith('/api/corporate-cards/')
+    ) {
+      return new Response(JSON.stringify({ error: '이 기능은 현재 비활성화되어 있습니다.' }), {
+        status: 410,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
 
@@ -215,27 +212,6 @@ export default {
         return await handleUpdateVacation(request, supabaseAdmin, env, ctx, vacationId);
       }
 
-      if (url.pathname === '/api/allowances/types' && request.method === 'GET') {
-        return await handleListAllowanceTypes(request, supabaseAdmin);
-      }
-      if (url.pathname === '/api/allowances/availability' && request.method === 'GET') {
-        return await handleListAllowanceAvailability(request, supabaseAdmin);
-      }
-      if (url.pathname === '/api/allowances' && request.method === 'GET') {
-        return await handleListAllowances(request, supabaseAdmin);
-      }
-      if (url.pathname === '/api/allowances' && request.method === 'POST') {
-        return await handleCreateAllowance(request, supabaseAdmin);
-      }
-      if (url.pathname.startsWith('/api/allowances/') && request.method === 'PATCH') {
-        const entryId = url.pathname.slice('/api/allowances/'.length);
-        return await handleUpdateAllowance(request, supabaseAdmin, entryId);
-      }
-      if (url.pathname.startsWith('/api/allowances/') && request.method === 'DELETE') {
-        const entryId = url.pathname.slice('/api/allowances/'.length);
-        return await handleDeleteAllowance(request, supabaseAdmin, entryId);
-      }
-
       if (url.pathname === '/api/calendar-notes' && request.method === 'GET') {
         return await handleListCalendarNotes(request, supabaseAdmin);
       }
@@ -255,30 +231,6 @@ export default {
       }
       if (url.pathname === '/api/meal-plan/image' && request.method === 'GET') {
         return await handleGetMealPlanImage(request, supabaseAdmin, env);
-      }
-
-      if (url.pathname === '/api/corporate-cards' && request.method === 'GET') {
-        return await handleListCorporateCards(request, supabaseAdmin);
-      }
-      if (url.pathname === '/api/corporate-cards' && request.method === 'POST') {
-        return await handleCreateCorporateCard(request, supabaseAdmin, env, ctx);
-      }
-      if (url.pathname.startsWith('/api/corporate-cards/') && request.method === 'PATCH') {
-        const id = decodeURIComponent(url.pathname.slice('/api/corporate-cards/'.length));
-        return await handleUpdateCorporateCard(request, supabaseAdmin, env, ctx, id);
-      }
-      if (url.pathname.startsWith('/api/corporate-cards/') && request.method === 'DELETE') {
-        const id = decodeURIComponent(url.pathname.slice('/api/corporate-cards/'.length));
-        return await handleDeleteCorporateCard(request, supabaseAdmin, env, ctx, id);
-      }
-      const corporateCardReceiptMatch = url.pathname.match(/^\/api\/corporate-cards\/([0-9a-f-]+)\/receipt$/i);
-      if (corporateCardReceiptMatch && request.method === 'GET') {
-        return await handleGetCorporateCardReceipt(
-          request,
-          supabaseAdmin,
-          env,
-          corporateCardReceiptMatch[1]
-        );
       }
 
       // 8. 404 경로 처리
