@@ -100,7 +100,7 @@ async function parseEntryBody(request, existing, auth) {
     const file = form.get('receipt');
     if (file && typeof file === 'object' && typeof file.arrayBuffer === 'function' && file.size > 0) {
       if (file.size > MAX_RECEIPT_BYTES) {
-        throw Object.assign(new Error('영수증 사진은 5MB 이하로 올려 주세요.'), { status: 413 });
+        throw Object.assign(new Error('압축된 영수증 사진은 1MB 이하로 올려 주세요.'), { status: 413 });
       }
       receipt = new Uint8Array(await file.arrayBuffer());
       if (
@@ -167,8 +167,16 @@ export async function handleListCorporateCards(request, supabaseAdmin) {
 
     const url = new URL(request.url);
     const month = url.searchParams.get('month');
+    const from = url.searchParams.get('from');
+    const to = url.searchParams.get('to');
     if (month && !isMonth(month)) {
       return jsonResponse({ error: '조회할 월을 YYYY-MM 형식으로 입력해 주세요.' }, 400);
+    }
+    if ((from || to) && (!isDate(from) || !isDate(to) || from > to)) {
+      return jsonResponse({ error: '조회 기간을 올바르게 입력해 주세요.' }, 400);
+    }
+    if (month && (from || to)) {
+      return jsonResponse({ error: '월별 조회와 기간 조회를 함께 사용할 수 없습니다.' }, 400);
     }
 
     let query = supabaseAdmin
@@ -182,6 +190,8 @@ export async function handleListCorporateCards(request, supabaseAdmin) {
       const start = `${month}-01`;
       const nextMonth = new Date(Date.UTC(year, monthNumber, 1)).toISOString().slice(0, 10);
       query = query.gte('spent_on', start).lt('spent_on', nextMonth);
+    } else if (from && to) {
+      query = query.gte('spent_on', from).lte('spent_on', to);
     }
 
     const { data, error, count } = await query;
