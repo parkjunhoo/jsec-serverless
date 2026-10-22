@@ -130,24 +130,22 @@ export async function handleCreateAnnualLeaveRequest(request, supabaseAdmin, env
       .maybeSingle();
     if (memberError) throw memberError;
 
-    const { data, error } = await supabaseAdmin
-      .from('annual_leave_requests')
-      .insert({
-        user_id: auth.user.id,
-        username: auth.profile.name || auth.profile.username || '회원',
-        department: member?.work_location || '',
-        leave_type: leaveType,
-        start_date: startDate,
-        start_time: startTime,
-        end_date: endDate,
-        end_time: endTime,
-        total_days: totalDays,
-        hours_used: hoursUsed,
-        details
-      })
-      .select(REQUEST_FIELDS)
-      .single();
+    const { data, error } = await supabaseAdmin.rpc('create_annual_leave_request_with_balance', {
+      p_user_id: auth.user.id,
+      p_username: auth.profile.name || auth.profile.username || '회원',
+      p_department: member?.work_location || '',
+      p_leave_type: leaveType,
+      p_start_date: startDate,
+      p_start_time: startTime,
+      p_end_date: endDate,
+      p_end_time: endTime,
+      p_total_days: totalDays,
+      p_hours_used: hoursUsed,
+      p_details: details
+    });
     if (error) throw error;
+    const createdRequest = Array.isArray(data) ? data[0] : data;
+    if (!createdRequest) throw new Error('연차 신청 결과를 확인할 수 없습니다.');
 
     let notificationWarning = '';
     let adminUserIds = [];
@@ -162,7 +160,7 @@ export async function handleCreateAnnualLeaveRequest(request, supabaseAdmin, env
         supabaseAdmin,
         adminUserIds,
         '새 연차 신청',
-        `${data.username} 님이 ${data.start_date}~${data.end_date} ${data.leave_type === '시간차' ? `시간차 ${data.hours_used}시간` : `연차 ${data.total_days}일`}을 신청했습니다.`,
+        `${createdRequest.username} 님이 ${createdRequest.start_date}~${createdRequest.end_date} ${createdRequest.leave_type === '시간차' ? `시간차 ${createdRequest.hours_used}시간` : `연차 ${createdRequest.total_days}일`}을 신청했습니다.`,
         'annual_leave_request'
       );
       if (notificationError) throw notificationError;
@@ -174,15 +172,16 @@ export async function handleCreateAnnualLeaveRequest(request, supabaseAdmin, env
     if (adminUserIds.length > 0) {
       schedulePushToUsers(context, supabaseAdmin, env, adminUserIds, {
         title: '새 연차 신청',
-        body: `${data.username} 님이 ${data.start_date}~${data.end_date} ${data.leave_type === '시간차' ? `시간차 ${data.hours_used}시간` : `연차 ${data.total_days}일`}을 신청했습니다.`,
+        body: `${createdRequest.username} 님이 ${createdRequest.start_date}~${createdRequest.end_date} ${createdRequest.leave_type === '시간차' ? `시간차 ${createdRequest.hours_used}시간` : `연차 ${createdRequest.total_days}일`}을 신청했습니다.`,
         type: 'annual_leave_request'
       });
     }
 
-    return jsonResponse({ success: true, request: data, notificationWarning }, 201);
+    return jsonResponse({ success: true, request: createdRequest, notificationWarning }, 201);
   } catch (error) {
     console.error('연차 신청 등록 오류:', error);
-    return jsonResponse({ error: error.message || '연차 신청을 등록하지 못했습니다.' }, 500);
+    const status = /잔여 연차|입사일|연차 기준 기간/.test(error.message || '') ? 409 : 500;
+    return jsonResponse({ error: error.message || '연차 신청을 등록하지 못했습니다.' }, status);
   }
 }
 

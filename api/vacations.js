@@ -80,6 +80,9 @@ export async function handleCreateVacation(request, supabaseAdmin, env, context)
     if (!isValidDate(date) || !['휴무', '연차', '시간차', '공가'].includes(leaveType)) {
       return jsonResponse({ error: '휴무 날짜 또는 종류가 올바르지 않습니다.' }, 400);
     }
+    if (leaveType === '연차' && auth.profile.role !== 'admin') {
+      return jsonResponse({ error: '연차는 잔여 일수를 확인한 뒤 연차 신청 메뉴에서 신청해 주세요.' }, 409);
+    }
     const timeDetail = typeof body.time_detail === 'string' ? body.time_detail : '종일';
     if (!['종일', '시간지정'].includes(timeDetail)) {
       return jsonResponse({ error: '세부 시간이 올바르지 않습니다.' }, 400);
@@ -204,6 +207,12 @@ export async function handleUpdateVacation(request, supabaseAdmin, env, context,
     if (!isValidDate(date) || !['휴무', '연차', '시간차', '공가'].includes(leaveType)) {
       return jsonResponse({ error: '휴무 날짜 또는 종류가 올바르지 않습니다.' }, 400);
     }
+    if (
+      authorized.profile.role !== 'admin' &&
+      (leaveType === '연차' || authorized.vacation.leave_type === '연차')
+    ) {
+      return jsonResponse({ error: '연차 일정은 연차 신청 메뉴에서만 변경할 수 있습니다.' }, 409);
+    }
     const timeDetail = typeof body.time_detail === 'string' ? body.time_detail : '종일';
     if (!['종일', '시간지정'].includes(timeDetail)) {
       return jsonResponse({ error: '세부 시간이 올바르지 않습니다.' }, 400);
@@ -261,6 +270,9 @@ export async function handleDeleteVacation(request, supabaseAdmin, env, context,
     const authorized = await getVacationForAuthorizedUser(request, supabaseAdmin, vacationId);
     if (authorized.error) return authorized.error;
     if (authorized.response) return authorized.response;
+    if (authorized.profile.role !== 'admin' && authorized.vacation.leave_type === '연차') {
+      return jsonResponse({ error: '승인된 연차 일정은 연차 신청 메뉴에서 취소할 수 있습니다.' }, 409);
+    }
 
     const { error } = await supabaseAdmin
       .from('vacations')

@@ -39,6 +39,7 @@ import {
   handleListAnnualLeaveRequests,
   handleReviewAnnualLeaveRequest
 } from './api/annual-leave-requests.js';
+import { handleGetAnnualLeave, handleUpdateAnnualLeaveSettings } from './api/annual-leave.js';
 import {
   handleBroadcastPush,
   handleDeleteAllNotifications,
@@ -178,6 +179,12 @@ export default {
       }
       if (url.pathname === '/api/annual-leave-requests' && request.method === 'GET') {
         return await handleListAnnualLeaveRequests(request, supabaseAdmin);
+      }
+      if (url.pathname === '/api/annual-leave' && request.method === 'GET') {
+        return await handleGetAnnualLeave(request, supabaseAdmin);
+      }
+      if (url.pathname === '/api/annual-leave/settings' && request.method === 'PUT') {
+        return await handleUpdateAnnualLeaveSettings(request, supabaseAdmin);
       }
       if (url.pathname === '/api/annual-leave-requests' && request.method === 'POST') {
         return await handleCreateAnnualLeaveRequest(request, supabaseAdmin, env, ctx);
