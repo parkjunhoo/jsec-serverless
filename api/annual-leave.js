@@ -73,8 +73,8 @@ async function loadSettings(supabaseAdmin) {
   return data || [];
 }
 
-async function buildBalances(supabaseAdmin, members, settings) {
-  const today = getKoreaDate();
+async function buildBalances(supabaseAdmin, members, settings, asOfDate) {
+  const today = asOfDate;
   const eligibleMembers = members.filter(member =>
     member.annual_base_date && member.annual_base_date <= today
   );
@@ -184,6 +184,19 @@ export async function handleGetAnnualLeave(request, supabaseAdmin) {
       return jsonResponse({ error: '연차 현황을 조회할 권한이 없습니다.' }, 403);
     }
 
+    const url = new URL(request.url);
+    const hasAsOfDate = url.searchParams.has('as_of');
+    if (hasAsOfDate && auth.profile.role !== 'admin') {
+      return jsonResponse({ error: '관리자만 연차 산정 기준일을 변경할 수 있습니다.' }, 403);
+    }
+    const asOfDate = hasAsOfDate ? url.searchParams.get('as_of') : getKoreaDate();
+    const parsedAsOfDate = new Date(`${asOfDate}T00:00:00Z`);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(asOfDate)
+      || Number.isNaN(parsedAsOfDate.getTime())
+      || parsedAsOfDate.toISOString().slice(0, 10) !== asOfDate) {
+      return jsonResponse({ error: '연차 산정 기준일이 올바르지 않습니다.' }, 400);
+    }
+
     const settings = await loadSettings(supabaseAdmin);
     let membersQuery = supabaseAdmin
       .from('users')
@@ -196,8 +209,8 @@ export async function handleGetAnnualLeave(request, supabaseAdmin) {
     const { data: members, error } = await membersQuery;
     if (error) throw error;
 
-    const balances = await buildBalances(supabaseAdmin, members || [], settings);
-    return jsonResponse({ balances, settings, isAdmin: auth.profile.role === 'admin' });
+    const balances = await buildBalances(supabaseAdmin, members || [], settings, asOfDate);
+    return jsonResponse({ balances, settings, isAdmin: auth.profile.role === 'admin', asOfDate });
   } catch (error) {
     console.error('연차 현황 조회 오류:', error);
     return jsonResponse({ error: error.message || '연차 현황을 불러오지 못했습니다.' }, 500);
