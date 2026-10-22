@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS public.corporate_card_entries (
   memo text NOT NULL DEFAULT '' CHECK (char_length(memo) <= 1000),
   receipt_object_key text UNIQUE,
   receipt_content_type text,
-  receipt_size_bytes integer CHECK (receipt_size_bytes BETWEEN 1 AND 5242880),
+  receipt_size_bytes integer,
   created_by uuid REFERENCES public.users(id) ON DELETE SET NULL,
   created_by_name text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
@@ -20,8 +20,16 @@ CREATE TABLE IF NOT EXISTS public.corporate_card_entries (
       AND receipt_content_type = 'image/jpeg'
       AND receipt_size_bytes IS NOT NULL
     )
-  )
+  ),
+  CONSTRAINT corporate_card_entries_receipt_size_bytes_check
+    CHECK (receipt_size_bytes IS NULL OR receipt_size_bytes BETWEEN 1 AND 1048576)
 );
+
+ALTER TABLE public.corporate_card_entries
+  DROP CONSTRAINT IF EXISTS corporate_card_entries_receipt_size_bytes_check;
+ALTER TABLE public.corporate_card_entries
+  ADD CONSTRAINT corporate_card_entries_receipt_size_bytes_check
+  CHECK (receipt_size_bytes IS NULL OR receipt_size_bytes BETWEEN 1 AND 1048576) NOT VALID;
 
 CREATE INDEX IF NOT EXISTS corporate_card_entries_spent_on_idx
   ON public.corporate_card_entries (spent_on DESC, created_at DESC);

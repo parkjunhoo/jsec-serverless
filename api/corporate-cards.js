@@ -1,6 +1,6 @@
 import { authenticateRequest, jsonResponse } from './push.js';
 
-const MAX_RECEIPT_BYTES = 5 * 1024 * 1024;
+const MAX_RECEIPT_BYTES = 1024 * 1024;
 const TABLE_FIELDS = 'id, spent_on, merchant, amount, category, cardholder, memo, receipt_content_type, receipt_size_bytes, created_by_name, created_at, updated_at';
 const PRIVATE_FIELDS = `${TABLE_FIELDS}, receipt_object_key`;
 
@@ -33,7 +33,7 @@ async function readMultipartForm(request) {
       size += value.byteLength;
       if (size > MAX_RECEIPT_BYTES + 64 * 1024) {
         await reader.cancel();
-        throw Object.assign(new Error('영수증 사진은 5MB 이하로 올려 주세요.'), { status: 413 });
+        throw Object.assign(new Error('압축된 영수증 사진은 1MB 이하로 올려 주세요.'), { status: 413 });
       }
       chunks.push(value);
     }
@@ -89,7 +89,7 @@ async function parseEntryBody(request, existing, auth) {
   if (contentType.startsWith('multipart/form-data')) {
     const declaredLength = Number(request.headers.get('Content-Length'));
     if (Number.isFinite(declaredLength) && declaredLength > MAX_RECEIPT_BYTES + 64 * 1024) {
-      throw Object.assign(new Error('영수증 사진은 5MB 이하로 올려 주세요.'), { status: 413 });
+      throw Object.assign(new Error('압축된 영수증 사진은 1MB 이하로 올려 주세요.'), { status: 413 });
     }
     const form = await readMultipartForm(request);
     fields = Object.fromEntries(
