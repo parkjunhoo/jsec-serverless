@@ -1,6 +1,6 @@
 CREATE TABLE IF NOT EXISTS public.attendance_sites (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  site_number integer NOT NULL UNIQUE CHECK (site_number BETWEEN 1 AND 3),
+  site_number integer NOT NULL UNIQUE CHECK (site_number > 0),
   name text NOT NULL DEFAULT '',
   latitude double precision,
   longitude double precision,
@@ -16,6 +16,21 @@ CREATE TABLE IF NOT EXISTS public.attendance_sites (
     )
   )
 );
+
+ALTER TABLE public.attendance_sites
+  DROP CONSTRAINT IF EXISTS attendance_sites_site_number_check;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'public.attendance_sites'::regclass
+      AND conname = 'attendance_sites_site_number_positive'
+  ) THEN
+    ALTER TABLE public.attendance_sites
+      ADD CONSTRAINT attendance_sites_site_number_positive CHECK (site_number > 0);
+  END IF;
+END;
+$$;
 
 INSERT INTO public.attendance_sites (site_number, name)
 VALUES (1, '출근지 1'), (2, '출근지 2'), (3, '출근지 3')
@@ -87,41 +102,92 @@ DECLARE
   site_item jsonb;
   old_site public.attendance_sites%ROWTYPE;
   new_site public.attendance_sites%ROWTYPE;
-  site_no integer;
+  site_id uuid;
+  next_site_no integer;
+  included_site_ids uuid[] := ARRAY[]::uuid[];
 BEGIN
-  IF jsonb_typeof(p_sites) <> 'array' OR jsonb_array_length(p_sites) <> 3 THEN
-    RAISE EXCEPTION '출근지는 정확히 3곳을 설정해야 합니다.';
+  IF p_sites IS NULL OR jsonb_typeof(p_sites) <> 'array' THEN
+    RAISE EXCEPTION '출근지 설정 형식이 올바르지 않습니다.';
   END IF;
 
   PERFORM pg_advisory_xact_lock(hashtext('attendance-sites'));
   FOR site_item IN SELECT value FROM jsonb_array_elements(p_sites)
   LOOP
-    site_no := (site_item->>'site_number')::integer;
-    SELECT * INTO old_site
-    FROM public.attendance_sites
-    WHERE site_number = site_no
-    FOR UPDATE;
-    IF NOT FOUND THEN
-      RAISE EXCEPTION '출근지 설정을 찾을 수 없습니다.';
-    END IF;
+    site_id := NULLIF(site_item->>'id', '')::uuid;
+    IF site_id IS NULL THEN
+      SELECT COALESCE(MAX(site_number), 0) + 1 INTO next_site_no
+      FROM public.attendance_sites;
+      INSERT INTO public.attendance_sites (
+        site_number, name, latitude, longitude, radius_m, enabled, updated_by, updated_at
+      )
+      VALUES (
+        next_site_no,
+        site_item->>'name',
+        NULLIF(site_item->>'latitude', '')::double precision,
+        NULLIF(site_item->>'longitude', '')::double precision,
+        (site_item->>'radius_m')::integer,
+        (site_item->>'enabled')::boolean,
+        p_admin_id,
+        now()
+      )
+      RETURNING * INTO new_site;
+      INSERT INTO public.attendance_site_audit (site_id, changed_by, before_value, after_value)
+      VALUES (new_site.id, p_admin_id, '{}'::jsonb, to_jsonb(new_site));
+    ELSE
+      SELECT * INTO old_site
+      FROM public.attendance_sites
+      WHERE id = site_id
+      FOR UPDATE;
+      IF NOT FOUND THEN
+        RAISE EXCEPTION '출근지 설정을 찾을 수 없습니다.';
+      END IF;
+      IF old_site.enabled
+        AND NOT (site_item->>'enabled')::boolean
+        AND EXISTS (
+          SELECT 1 FROM public.attendance_records
+          WHERE location_id = old_site.id AND check_out_at IS NULL
+        ) THEN
+        RAISE EXCEPTION '퇴근 기록이 없는 근무가 있어 출근지를 보관할 수 없습니다.';
+      END IF;
 
+      UPDATE public.attendance_sites
+      SET name = site_item->>'name',
+          latitude = NULLIF(site_item->>'latitude', '')::double precision,
+          longitude = NULLIF(site_item->>'longitude', '')::double precision,
+          radius_m = (site_item->>'radius_m')::integer,
+          enabled = (site_item->>'enabled')::boolean,
+          updated_by = p_admin_id,
+          updated_at = now()
+      WHERE id = old_site.id
+      RETURNING * INTO new_site;
+
+      IF to_jsonb(old_site) - 'updated_at' - 'updated_by'
+        IS DISTINCT FROM to_jsonb(new_site) - 'updated_at' - 'updated_by' THEN
+        INSERT INTO public.attendance_site_audit (site_id, changed_by, before_value, after_value)
+        VALUES (new_site.id, p_admin_id, to_jsonb(old_site), to_jsonb(new_site));
+      END IF;
+    END IF;
+    included_site_ids := array_append(included_site_ids, new_site.id);
+    RETURN NEXT new_site;
+  END LOOP;
+
+  FOR old_site IN
+    SELECT * FROM public.attendance_sites
+    WHERE enabled AND NOT (id = ANY(included_site_ids))
+    FOR UPDATE
+  LOOP
+    IF EXISTS (
+      SELECT 1 FROM public.attendance_records
+      WHERE location_id = old_site.id AND check_out_at IS NULL
+    ) THEN
+      RAISE EXCEPTION '퇴근 기록이 없는 근무가 있어 출근지를 보관할 수 없습니다.';
+    END IF;
     UPDATE public.attendance_sites
-    SET name = site_item->>'name',
-        latitude = NULLIF(site_item->>'latitude', '')::double precision,
-        longitude = NULLIF(site_item->>'longitude', '')::double precision,
-        radius_m = (site_item->>'radius_m')::integer,
-        enabled = (site_item->>'enabled')::boolean,
-        updated_by = p_admin_id,
-        updated_at = now()
+    SET enabled = false, updated_by = p_admin_id, updated_at = now()
     WHERE id = old_site.id
     RETURNING * INTO new_site;
-
-    IF to_jsonb(old_site) - 'updated_at' - 'updated_by'
-      IS DISTINCT FROM to_jsonb(new_site) - 'updated_at' - 'updated_by' THEN
-      INSERT INTO public.attendance_site_audit (site_id, changed_by, before_value, after_value)
-      VALUES (new_site.id, p_admin_id, to_jsonb(old_site), to_jsonb(new_site));
-    END IF;
-    RETURN NEXT new_site;
+    INSERT INTO public.attendance_site_audit (site_id, changed_by, before_value, after_value)
+    VALUES (new_site.id, p_admin_id, to_jsonb(old_site), to_jsonb(new_site));
   END LOOP;
 END;
 $$;

@@ -59,8 +59,8 @@ export async function handleListAttendanceSites(request, supabaseAdmin) {
     const sites = data || [];
     return jsonResponse(isAdmin(auth.auth)
       ? sites
-      : sites.map(({ id, site_number, name, radius_m, enabled, latitude }) => ({
-        id, site_number, name, radius_m, enabled,
+      : sites.filter(site => site.enabled).map(({ id, site_number, name, radius_m, latitude }) => ({
+        id, site_number, name, radius_m, enabled: true,
         configured: latitude !== null
       })));
   } catch (error) {
@@ -76,26 +76,28 @@ export async function handleSaveAttendanceSites(request, supabaseAdmin) {
     if (!isAdmin(auth)) return jsonResponse({ error: '관리자만 출근지를 설정할 수 있습니다.' }, 403);
 
     const body = await parseBody(request);
-    if (!body || !Array.isArray(body.sites) || body.sites.length !== 3) {
-      return jsonResponse({ error: '출근지 3곳의 설정을 모두 입력해 주세요.' }, 400);
+    if (!body || !Array.isArray(body.sites)) {
+      return jsonResponse({ error: '출근지 설정 형식이 올바르지 않습니다.' }, 400);
     }
 
-    const siteNumbers = new Set();
+    const siteIds = new Set();
     const sites = [];
     for (const site of body.sites) {
       if (!site || typeof site !== 'object' || Array.isArray(site)) {
         return jsonResponse({ error: '출근지 설정 형식이 올바르지 않습니다.' }, 400);
       }
-      const siteNumber = Number(site.site_number);
+      const id = site.id === null || site.id === '' || site.id === undefined ? null : site.id;
       const name = typeof site.name === 'string' ? site.name.trim() : '';
       const radius = Number(site.radius_m);
       const latitude = site.latitude === null || site.latitude === '' ? null : Number(site.latitude);
       const longitude = site.longitude === null || site.longitude === '' ? null : Number(site.longitude);
       const enabled = site.enabled === true;
-      if (![1, 2, 3].includes(siteNumber) || siteNumbers.has(siteNumber)) {
-        return jsonResponse({ error: '출근지 번호가 중복되거나 올바르지 않습니다.' }, 400);
+      if (id !== null && (typeof id !== 'string'
+        || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)
+        || siteIds.has(id))) {
+        return jsonResponse({ error: '출근지 식별자가 중복되거나 올바르지 않습니다.' }, 400);
       }
-      siteNumbers.add(siteNumber);
+      if (id !== null) siteIds.add(id);
       if (!name || name.length > 80) {
         return jsonResponse({ error: '출근지 이름을 1~80자로 입력해 주세요.' }, 400);
       }
@@ -109,7 +111,7 @@ export async function handleSaveAttendanceSites(request, supabaseAdmin) {
         return jsonResponse({ error: '위도와 경도를 올바르게 함께 입력해 주세요.' }, 400);
       }
       sites.push({
-        site_number: siteNumber,
+        id,
         name,
         latitude,
         longitude,
@@ -117,7 +119,6 @@ export async function handleSaveAttendanceSites(request, supabaseAdmin) {
         enabled
       });
     }
-    if (siteNumbers.size !== 3) return jsonResponse({ error: '출근지 1~3 설정이 모두 필요합니다.' }, 400);
 
     const { data, error } = await supabaseAdmin.rpc('save_attendance_sites', {
       p_sites: sites,
