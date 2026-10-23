@@ -46,15 +46,64 @@ CREATE TABLE IF NOT EXISTS public.attendance_records (
   check_in_at timestamptz NOT NULL,
   check_in_accuracy_m double precision NOT NULL CHECK (check_in_accuracy_m BETWEEN 0 AND 100),
   check_in_distance_m double precision NOT NULL CHECK (check_in_distance_m >= 0),
+  check_in_latitude double precision,
+  check_in_longitude double precision,
+  check_in_device jsonb,
   check_out_at timestamptz,
   check_out_accuracy_m double precision CHECK (check_out_accuracy_m BETWEEN 0 AND 100),
   check_out_distance_m double precision CHECK (check_out_distance_m >= 0),
+  check_out_latitude double precision,
+  check_out_longitude double precision,
+  check_out_device jsonb,
   note text NOT NULL DEFAULT '',
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (user_id, work_date),
   CHECK (check_out_at IS NULL OR check_out_at >= check_in_at)
 );
+
+ALTER TABLE public.attendance_records
+  ADD COLUMN IF NOT EXISTS check_in_latitude double precision,
+  ADD COLUMN IF NOT EXISTS check_in_longitude double precision,
+  ADD COLUMN IF NOT EXISTS check_in_device jsonb,
+  ADD COLUMN IF NOT EXISTS check_out_latitude double precision,
+  ADD COLUMN IF NOT EXISTS check_out_longitude double precision,
+  ADD COLUMN IF NOT EXISTS check_out_device jsonb;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'public.attendance_records'::regclass
+      AND conname = 'attendance_records_check_in_coordinates_valid'
+  ) THEN
+    ALTER TABLE public.attendance_records
+      ADD CONSTRAINT attendance_records_check_in_coordinates_valid CHECK (
+        (check_in_latitude IS NULL AND check_in_longitude IS NULL)
+        OR (
+          check_in_latitude IS NOT NULL AND check_in_longitude IS NOT NULL
+          AND check_in_latitude BETWEEN -90 AND 90
+          AND check_in_longitude BETWEEN -180 AND 180
+        )
+      );
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'public.attendance_records'::regclass
+      AND conname = 'attendance_records_check_out_coordinates_valid'
+  ) THEN
+    ALTER TABLE public.attendance_records
+      ADD CONSTRAINT attendance_records_check_out_coordinates_valid CHECK (
+        (check_out_latitude IS NULL AND check_out_longitude IS NULL)
+        OR (
+          check_out_latitude IS NOT NULL AND check_out_longitude IS NOT NULL
+          AND check_out_latitude BETWEEN -90 AND 90
+          AND check_out_longitude BETWEEN -180 AND 180
+        )
+      );
+  END IF;
+END;
+$$;
 
 CREATE INDEX IF NOT EXISTS attendance_records_work_date_idx
   ON public.attendance_records (work_date DESC);

@@ -62,6 +62,7 @@ import {
   handleRegisterPushToken,
   handleSetPushPreference
 } from './api/push.js';
+import { handleGetWeather } from './api/weather.js';
 
 export default {
   async fetch(request, env, ctx) {
@@ -115,6 +116,10 @@ export default {
       // 4. 회원 목록 라우팅
       if (url.pathname === '/api/users/list' && request.method === 'GET') {
         return await handleListUsers(request, supabaseAdmin);
+      }
+
+      if (url.pathname === '/api/weather' && request.method === 'GET') {
+        return await handleGetWeather(request, supabaseAdmin, env, ctx);
       }
 
       // 5. 회원 삭제 라우팅 (경로가 /api/users/delete/ 로 시작하고 DELETE 요청인 경우)

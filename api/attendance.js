@@ -1,7 +1,7 @@
 import { authenticateRequest, jsonResponse } from './push.js';
 
 const SITE_FIELDS = 'id, site_number, name, latitude, longitude, radius_m, enabled, updated_at';
-const RECORD_FIELDS = 'id, user_id, username, location_id, location_name, work_date, check_in_at, check_in_accuracy_m, check_in_distance_m, check_out_at, check_out_accuracy_m, check_out_distance_m, note, created_at, updated_at';
+const RECORD_FIELDS = 'id, user_id, username, location_id, location_name, work_date, check_in_at, check_in_accuracy_m, check_in_distance_m, check_in_latitude, check_in_longitude, check_in_device, check_out_at, check_out_accuracy_m, check_out_distance_m, check_out_latitude, check_out_longitude, check_out_device, note, created_at, updated_at';
 const MAX_LOCATION_ACCURACY_M = 100;
 
 function isAdmin(auth) {
@@ -34,6 +34,29 @@ function distanceInMeters(latitude1, longitude1, latitude2, longitude2) {
 
 function validCoordinate(value, min, max) {
   return typeof value === 'number' && Number.isFinite(value) && value >= min && value <= max;
+}
+
+function omitGpsCoordinates(record) {
+  const {
+    check_in_latitude,
+    check_in_longitude,
+    check_in_device,
+    check_out_latitude,
+    check_out_longitude,
+    check_out_device,
+    ...visibleRecord
+  } = record;
+  return visibleRecord;
+}
+
+function normalizeDeviceInfo(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const fields = ['manufacturer', 'model', 'android_version', 'app_version'];
+  const device = Object.fromEntries(fields.map(field => [
+    field,
+    typeof value[field] === 'string' ? value[field].trim().slice(0, 120) : ''
+  ]));
+  return device.model ? device : null;
 }
 
 async function requireEmployee(request, supabaseAdmin) {
@@ -161,7 +184,10 @@ export async function handleListAttendanceRecords(request, supabaseAdmin) {
     }
     const { data, error } = await query;
     if (error) throw error;
-    return jsonResponse({ records: data || [], isAdmin: isAdmin(auth) });
+    return jsonResponse({
+      records: isAdmin(auth) ? data || [] : (data || []).map(omitGpsCoordinates),
+      isAdmin: isAdmin(auth)
+    });
   } catch (error) {
     console.error('근태 기록 조회 오류:', error);
     return jsonResponse({ error: error.message || '근태 기록을 불러오지 못했습니다.' }, 500);
@@ -177,8 +203,7 @@ export async function handleAttendancePunch(request, supabaseAdmin, action) {
     }
 
     const body = await parseBody(request);
-    if (!body || typeof body.location_id !== 'string'
-      || !validCoordinate(body.latitude, -90, 90)
+    if (!body || !validCoordinate(body.latitude, -90, 90)
       || !validCoordinate(body.longitude, -180, 180)
       || typeof body.accuracy_m !== 'number'
       || !Number.isFinite(body.accuracy_m)
@@ -188,22 +213,62 @@ export async function handleAttendancePunch(request, supabaseAdmin, action) {
     }
     const note = typeof body.note === 'string' ? body.note.trim() : '';
     if (note.length > 500) return jsonResponse({ error: '메모는 500자 이내로 입력해 주세요.' }, 400);
+    const device = normalizeDeviceInfo(body.device);
+    if (!device) {
+      return jsonResponse({ error: '앱 기기 정보를 확인할 수 없습니다. 최신 Android 앱에서 다시 시도해 주세요.' }, 400);
+    }
 
-    const { data: site, error: siteError } = await supabaseAdmin
+    const { data: openRecords, error: lookupError } = await supabaseAdmin
+      .from('attendance_records')
+      .select('id, location_id, work_date, check_in_at')
+      .eq('user_id', employee.auth.user.id)
+      .is('check_out_at', null)
+      .order('check_in_at', { ascending: false })
+      .limit(2);
+    if (lookupError) throw lookupError;
+    const activeRecords = openRecords || [];
+    const existing = activeRecords[0] || null;
+    if (action === 'check-in' && existing) {
+      return jsonResponse({
+        error: `퇴근하지 않은 근무 기록(${existing.work_date})이 있습니다. 먼저 해당 근무를 마치거나 관리자에게 기록 정정을 요청해 주세요.`
+      }, 409);
+    }
+    if (action === 'check-out' && !existing) {
+      return jsonResponse({ error: '퇴근할 출근 기록이 없습니다. 먼저 출근해 주세요.' }, 409);
+    }
+    if (action === 'check-out' && activeRecords.length > 1) {
+      return jsonResponse({
+        error: '퇴근하지 않은 근무 기록이 여러 건 있습니다. 관리자에게 기록 확인을 요청해 주세요.'
+      }, 409);
+    }
+
+    let siteQuery = supabaseAdmin
       .from('attendance_sites')
       .select(SITE_FIELDS)
-      .eq('id', body.location_id)
-      .maybeSingle();
+      .eq('enabled', true)
+      .not('latitude', 'is', null)
+      .not('longitude', 'is', null)
+      .order('site_number', { ascending: true });
+    if (action === 'check-out') siteQuery = siteQuery.eq('id', existing.location_id);
+    const { data: configuredSites, error: siteError } = await siteQuery;
     if (siteError) throw siteError;
-    if (!site || !site.enabled || site.latitude === null || site.longitude === null) {
-      return jsonResponse({ error: '사용할 수 있도록 설정된 출근지가 아닙니다.' }, 400);
-    }
-    const distance = distanceInMeters(body.latitude, body.longitude, site.latitude, site.longitude);
-    if (distance > site.radius_m) {
+
+    const matchingSites = (configuredSites || [])
+      .map(site => ({
+        site,
+        distance: distanceInMeters(body.latitude, body.longitude, site.latitude, site.longitude)
+      }))
+      .filter(({ site, distance }) => distance <= site.radius_m)
+      .sort((first, second) => first.distance - second.distance);
+    const match = matchingSites[0];
+    if (!match) {
       return jsonResponse({
-        error: `${site.name} 출근지 반경 밖입니다. 현재 약 ${Math.round(distance)}m, 허용 반경 ${site.radius_m}m입니다.`
+        error: action === 'check-out'
+          ? '퇴근은 출근을 등록한 출근지 반경 안에서 해 주세요.'
+          : '등록된 출근지 반경 안에서만 출근할 수 있습니다.'
       }, 403);
     }
+    const { site, distance } = match;
 
     const now = new Date().toISOString();
     const workDate = getKoreaDate();
@@ -222,6 +287,9 @@ export async function handleAttendancePunch(request, supabaseAdmin, action) {
           check_in_at: now,
           check_in_accuracy_m: body.accuracy_m,
           check_in_distance_m: Math.round(distance),
+          check_in_latitude: body.latitude,
+          check_in_longitude: body.longitude,
+          check_in_device: device,
           note
         })
         .select(RECORD_FIELDS)
@@ -230,20 +298,7 @@ export async function handleAttendancePunch(request, supabaseAdmin, action) {
         return jsonResponse({ error: '오늘 출근 기록이 이미 있습니다.' }, 409);
       }
       if (error) throw error;
-      return jsonResponse({ record: data });
-    }
-
-    const { data: existing, error: lookupError } = await supabaseAdmin
-      .from('attendance_records')
-      .select('id, location_id, check_out_at')
-      .eq('user_id', employee.auth.user.id)
-      .eq('work_date', workDate)
-      .maybeSingle();
-    if (lookupError) throw lookupError;
-    if (!existing) return jsonResponse({ error: '오늘 출근 기록이 없습니다. 먼저 출근해 주세요.' }, 409);
-    if (existing.check_out_at) return jsonResponse({ error: '오늘 퇴근 기록이 이미 있습니다.' }, 409);
-    if (existing.location_id !== site.id) {
-      return jsonResponse({ error: '퇴근은 출근 시 선택한 동일한 지점에서 등록해 주세요.' }, 400);
+      return jsonResponse({ record: omitGpsCoordinates(data) });
     }
 
     const { data, error } = await supabaseAdmin
@@ -252,6 +307,9 @@ export async function handleAttendancePunch(request, supabaseAdmin, action) {
         check_out_at: now,
         check_out_accuracy_m: body.accuracy_m,
         check_out_distance_m: Math.round(distance),
+        check_out_latitude: body.latitude,
+        check_out_longitude: body.longitude,
+        check_out_device: device,
         note: note || undefined,
         updated_at: now
       })
@@ -262,7 +320,7 @@ export async function handleAttendancePunch(request, supabaseAdmin, action) {
       .maybeSingle();
     if (error) throw error;
     if (!data) return jsonResponse({ error: '퇴근 기록이 이미 처리되었습니다. 새로고침해 주세요.' }, 409);
-    return jsonResponse({ record: data });
+    return jsonResponse({ record: omitGpsCoordinates(data) });
   } catch (error) {
     console.error('출퇴근 기록 등록 오류:', error);
     return jsonResponse({ error: error.message || '출퇴근 기록을 등록하지 못했습니다.' }, 500);
