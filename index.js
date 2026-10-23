@@ -45,6 +45,13 @@ import {
   handleUpdateEmployeeAnnualLeaveDeductions
 } from './api/annual-leave.js';
 import {
+  handleAttendancePunch,
+  handleCorrectAttendanceRecord,
+  handleListAttendanceRecords,
+  handleListAttendanceSites,
+  handleSaveAttendanceSites
+} from './api/attendance.js';
+import {
   handleBroadcastPush,
   handleDeleteAllNotifications,
   handleDeleteNotification,
@@ -192,6 +199,25 @@ export default {
       }
       if (url.pathname === '/api/annual-leave/deductions' && request.method === 'PUT') {
         return await handleUpdateEmployeeAnnualLeaveDeductions(request, supabaseAdmin);
+      }
+      if (url.pathname === '/api/attendance/sites' && request.method === 'GET') {
+        return await handleListAttendanceSites(request, supabaseAdmin);
+      }
+      if (url.pathname === '/api/attendance/sites' && request.method === 'PUT') {
+        return await handleSaveAttendanceSites(request, supabaseAdmin);
+      }
+      if (url.pathname === '/api/attendance/records' && request.method === 'GET') {
+        return await handleListAttendanceRecords(request, supabaseAdmin);
+      }
+      if (url.pathname.startsWith('/api/attendance/records/') && request.method === 'PATCH') {
+        const recordId = decodeURIComponent(url.pathname.slice('/api/attendance/records/'.length));
+        return await handleCorrectAttendanceRecord(request, supabaseAdmin, recordId);
+      }
+      if (url.pathname === '/api/attendance/check-in' && request.method === 'POST') {
+        return await handleAttendancePunch(request, supabaseAdmin, 'check-in');
+      }
+      if (url.pathname === '/api/attendance/check-out' && request.method === 'POST') {
+        return await handleAttendancePunch(request, supabaseAdmin, 'check-out');
       }
       if (url.pathname === '/api/annual-leave-requests' && request.method === 'POST') {
         return await handleCreateAnnualLeaveRequest(request, supabaseAdmin, env, ctx);
