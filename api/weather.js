@@ -245,6 +245,22 @@ function groupByCategory(items) {
   return new Map(items.map(item => [item.category, item.obsrValue ?? item.fcstValue]));
 }
 
+function getPrecipitation(values, amountCategory, precipitationType) {
+  const rawAmount = values.get(amountCategory);
+  const hasPrecipitation = Number(precipitationType) > 0;
+  if (rawAmount == null || String(rawAmount).trim() === '' || String(rawAmount).trim() === '-') {
+    return hasPrecipitation ? '강수량 집계 중' : '강수 없음';
+  }
+  const amount = String(rawAmount).trim();
+  if (/^(?:강수\s*없음|적설\s*없음)$/i.test(amount)) {
+    return hasPrecipitation ? '강수량 집계 중' : '강수 없음';
+  }
+  if (/^0+(?:\.0+)?\s*mm?$/i.test(amount) || /^0+(?:\.0+)?$/.test(amount)) {
+    return hasPrecipitation ? '미량 강수 · 집계 중' : '강수 없음';
+  }
+  return amount;
+}
+
 function getCondition(sky, precipitation) {
   const rainType = Number(precipitation);
   if (rainType === 1 || rainType === 4) return { text: rainType === 4 ? '소나기' : '비', icon: '🌧️' };
@@ -299,7 +315,7 @@ async function getWeather(serviceKey, location) {
         temperature: values.get('TMP') ?? values.get('T1H') ?? null,
         condition: condition.text,
         icon: condition.icon,
-        precipitation: values.get('PCP') ?? values.get('RN1') ?? '강수 없음',
+        precipitation: getPrecipitation(values, 'PCP', values.get('PTY')),
         precipitationProbability: values.get('POP') ?? null,
         wind: values.get('WSD') ?? null
       };
@@ -318,7 +334,7 @@ async function getWeather(serviceKey, location) {
       temperature: observedValues.get('T1H') ?? null,
       humidity: observedValues.get('REH') ?? null,
       wind: observedValues.get('WSD') ?? null,
-      precipitation: observedValues.get('RN1') ?? '강수 없음',
+      precipitation: getPrecipitation(observedValues, 'RN1', observedValues.get('PTY')),
       precipitationProbability: nearestForecast?.get('POP') ?? null,
       condition: condition.text,
       icon: condition.icon
