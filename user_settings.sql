@@ -9,6 +9,14 @@ CREATE TABLE IF NOT EXISTS public.user_settings (
 ALTER TABLE public.user_settings
   ADD COLUMN IF NOT EXISTS large_text_mode boolean NOT NULL DEFAULT false;
 
+ALTER TABLE public.user_settings
+  ADD COLUMN IF NOT EXISTS push_vacation_user_ids uuid[] NOT NULL DEFAULT '{}'::uuid[],
+  ADD COLUMN IF NOT EXISTS push_vacation_all boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS push_admin_notifications boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS push_quiet_hours_enabled boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS push_quiet_hours_start time,
+  ADD COLUMN IF NOT EXISTS push_quiet_hours_end time;
+
 ALTER TABLE public.user_settings ENABLE ROW LEVEL SECURITY;
 
 REVOKE ALL ON TABLE public.user_settings FROM anon;

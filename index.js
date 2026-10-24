@@ -58,11 +58,13 @@ import {
   handleDeleteAllNotifications,
   handleDeleteNotification,
   handleGetPushPreference,
+  handleGetPushSettings,
   handleListNotifications,
   handleMarkAllNotificationsRead,
   handleMarkNotificationRead,
   handleRegisterPushToken,
-  handleSetPushPreference
+  handleSetPushPreference,
+  handleSetPushSettings
 } from './api/push.js';
 import { handleGetWeather } from './api/weather.js';
 
@@ -182,6 +184,12 @@ export default {
       }
       if (url.pathname === '/api/push/preference' && request.method === 'PUT') {
         return await handleSetPushPreference(request, supabaseAdmin);
+      }
+      if (url.pathname === '/api/push/settings' && request.method === 'GET') {
+        return await handleGetPushSettings(request, supabaseAdmin);
+      }
+      if (url.pathname === '/api/push/settings' && request.method === 'PUT') {
+        return await handleSetPushSettings(request, supabaseAdmin);
       }
       if (url.pathname === '/api/push/broadcast' && request.method === 'POST') {
         return await handleBroadcastPush(request, supabaseAdmin, env);

@@ -124,7 +124,8 @@ export async function handleCreateVacation(request, supabaseAdmin, env, context)
     schedulePush(context, supabaseAdmin, env, {
       title: '휴무 일정 등록',
       body: `${createDescription} ${date} ${leaveType} 일정을 등록했습니다.`,
-      type: 'vacation_create'
+      type: 'vacation_create',
+      audience_user_ids: [member.id]
     });
     return jsonResponse({ success: true, vacation: data });
   } catch (error) {
@@ -186,7 +187,8 @@ export async function handleBulkCreateVacations(request, supabaseAdmin, env, con
     schedulePush(context, supabaseAdmin, env, {
       title: '휴무 일정 일괄 등록',
       body: `${createDescription} 휴무 ${data.length}건을 등록했습니다.`,
-      type: 'vacation_create'
+      type: 'vacation_create',
+      audience_user_ids: [member.id]
     });
     return jsonResponse({ success: true, count: data.length, vacations: data });
   } catch (error) {
@@ -256,7 +258,8 @@ export async function handleUpdateVacation(request, supabaseAdmin, env, context,
     schedulePush(context, supabaseAdmin, env, {
       title: '휴무 일정 수정',
       body: `${editDescription} ${authorized.vacation.date} ${authorized.vacation.leave_type} 일정을 ${date} ${leaveType}로 변경했습니다.`,
-      type: 'vacation_update'
+      type: 'vacation_update',
+      audience_user_ids: [data.user_id]
     });
     return jsonResponse({ success: true, vacation: data });
   } catch (error) {
@@ -287,7 +290,8 @@ export async function handleDeleteVacation(request, supabaseAdmin, env, context,
     schedulePush(context, supabaseAdmin, env, {
       title: '휴무 일정 삭제',
       body: `${deleteDescription} ${authorized.vacation.date} ${authorized.vacation.leave_type} 일정을 삭제했습니다.`,
-      type: 'vacation_delete'
+      type: 'vacation_delete',
+      audience_user_ids: [authorized.vacation.user_id]
     });
     return jsonResponse({ success: true, message: '휴무가 삭제되었습니다.' });
   } catch (error) {

@@ -14,6 +14,56 @@ function jsonResponse(body, status = 200) {
   });
 }
 
+const PUSH_SETTINGS_FIELDS = 'push_vacation_all, push_vacation_user_ids, push_admin_notifications, push_quiet_hours_enabled, push_quiet_hours_start, push_quiet_hours_end';
+
+function isValidUuid(value) {
+  return typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function isValidTime(value) {
+  return typeof value === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
+}
+
+function isInQuietHours(settings) {
+  if (!settings?.push_quiet_hours_enabled) return false;
+  const start = String(settings.push_quiet_hours_start || '').slice(0, 5);
+  const end = String(settings.push_quiet_hours_end || '').slice(0, 5);
+  if (!isValidTime(start) || !isValidTime(end)) return false;
+  if (start === end) return true;
+  const current = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+  }).format(new Date());
+  return start < end ? current >= start && current < end : current >= start || current < end;
+}
+
+function allowsNotification(settings, notification) {
+  if (notification.type === 'admin_broadcast' && (!settings || settings.push_admin_notifications === false)) return false;
+  if (notification.type.startsWith('vacation_') && settings) {
+    if (settings.push_vacation_all === false
+      && !(notification.audience_user_ids || []).some(userId => (settings.push_vacation_user_ids || []).includes(userId))) return false;
+  }
+  if (notification.type.startsWith('vacation_') && !settings) return false;
+  return true;
+}
+
+async function loadPushSettings(supabaseAdmin, userIds) {
+  if (!userIds.length) return new Map();
+  const { data, error } = await supabaseAdmin
+    .from('user_settings')
+    .select(`user_id, ${PUSH_SETTINGS_FIELDS}`)
+    .in('user_id', userIds);
+  if (error) throw error;
+  return new Map((data || []).map(settings => [settings.user_id, settings]));
+}
+
+async function deleteExpiredNotifications(supabaseAdmin, userId = null) {
+  const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  let query = supabaseAdmin.from('notifications').delete().lt('created_at', cutoff);
+  if (userId) query = query.eq('user_id', userId);
+  const { error } = await query;
+  if (error) throw error;
+}
+
 function base64UrlEncode(value) {
   const bytes = typeof value === 'string' ? new TextEncoder().encode(value) : value;
   let binary = '';
@@ -110,13 +160,18 @@ export async function sendPushToUsers(supabaseAdmin, env, userIds, notification)
   }
 
   const enabledRegistrations = registrations.filter(registration => registration.enabled);
-  if (enabledRegistrations.length === 0) return { sent: 0, failed: 0 };
+  const settingsByUser = await loadPushSettings(supabaseAdmin, uniqueUserIds);
+  const allowedRegistrations = enabledRegistrations.filter(registration => {
+    const settings = settingsByUser.get(registration.user_id);
+    return allowsNotification(settings, notification) && !isInQuietHours(settings);
+  });
+  if (allowedRegistrations.length === 0) return { sent: 0, failed: 0 };
   const accessToken = await getFcmAccessToken(serviceAccount);
   let sent = 0;
   let failed = 0;
 
-  for (let offset = 0; offset < enabledRegistrations.length; offset += 25) {
-    const batch = enabledRegistrations.slice(offset, offset + 25);
+  for (let offset = 0; offset < allowedRegistrations.length; offset += 25) {
+    const batch = allowedRegistrations.slice(offset, offset + 25);
     const results = await Promise.all(batch.map(async ({ token }) => {
       const response = await fetch(
         `https://fcm.googleapis.com/v1/projects/${encodeURIComponent(serviceAccount.project_id)}/messages:send`,
@@ -177,6 +232,8 @@ export async function sendPushToAll(supabaseAdmin, env, notification) {
     throw new Error('FCM 서비스 계정 JSON에 필수 항목이 없습니다.');
   }
 
+  await deleteExpiredNotifications(supabaseAdmin);
+
   const userIds = [];
   for (let offset = 0; ; offset += 1000) {
     const { data, error } = await supabaseAdmin
@@ -188,10 +245,12 @@ export async function sendPushToAll(supabaseAdmin, env, notification) {
     if (!data || data.length < 1000) break;
   }
 
-  for (let offset = 0; offset < userIds.length; offset += 500) {
+  const settingsByUser = await loadPushSettings(supabaseAdmin, userIds);
+  const eligibleUserIds = userIds.filter(userId => allowsNotification(settingsByUser.get(userId), notification));
+  for (let offset = 0; offset < eligibleUserIds.length; offset += 500) {
     const { error } = await supabaseAdmin
       .from('notifications')
-      .insert(userIds.slice(offset, offset + 500).map(userId => ({
+      .insert(eligibleUserIds.slice(offset, offset + 500).map(userId => ({
         user_id: userId,
         title: notification.title,
         body: notification.body,
@@ -210,15 +269,18 @@ export async function sendPushToAll(supabaseAdmin, env, notification) {
     registrations.push(...(data || []));
     if (!data || data.length < 1000) break;
   }
-  const enabledRegistrations = registrations.filter(registration => registration.enabled);
-  if (enabledRegistrations.length === 0) return { sent: 0, failed: 0 };
+  const eligibleRegistrations = registrations.filter(registration => {
+    const settings = settingsByUser.get(registration.user_id);
+    return registration.enabled && eligibleUserIds.includes(registration.user_id) && !isInQuietHours(settings);
+  });
+  if (eligibleRegistrations.length === 0) return { sent: 0, failed: 0 };
 
   const accessToken = await getFcmAccessToken(serviceAccount);
   let sent = 0;
   let failed = 0;
 
-  for (let offset = 0; offset < enabledRegistrations.length; offset += 25) {
-    const batch = enabledRegistrations.slice(offset, offset + 25);
+  for (let offset = 0; offset < eligibleRegistrations.length; offset += 25) {
+    const batch = eligibleRegistrations.slice(offset, offset + 25);
     const results = await Promise.all(batch.map(async ({ token }) => {
       const response = await fetch(
         `https://fcm.googleapis.com/v1/projects/${encodeURIComponent(serviceAccount.project_id)}/messages:send`,
@@ -324,7 +386,7 @@ export async function handleRegisterPushToken(request, supabaseAdmin) {
       platform: 'android',
       enabled: existingToken
         ? existingToken.enabled
-        : auth.profile.role !== 'guest' && auth.profile.role !== 'monitor',
+        : false,
       updated_at: new Date().toISOString()
     }, { onConflict: 'token' });
   if (error) throw error;
@@ -379,9 +441,66 @@ export async function handleSetPushPreference(request, supabaseAdmin) {
   return jsonResponse({ success: true, enabled: data.enabled });
 }
 
+export async function handleGetPushSettings(request, supabaseAdmin) {
+  const auth = await authenticateRequest(request, supabaseAdmin);
+  if (auth.error) return auth.error;
+  const [{ data: settings, error: settingsError }, { data: members, error: membersError }] = await Promise.all([
+    supabaseAdmin.from('user_settings').select(PUSH_SETTINGS_FIELDS).eq('user_id', auth.user.id).maybeSingle(),
+    supabaseAdmin.from('users').select('id, name, username, role, status').not('status', 'eq', '퇴직').order('name', { ascending: true })
+  ]);
+  if (settingsError) throw settingsError;
+  if (membersError) throw membersError;
+  return jsonResponse({
+    settings: settings || { push_vacation_all: false, push_vacation_user_ids: [], push_admin_notifications: false, push_quiet_hours_enabled: false, push_quiet_hours_start: '22:00:00', push_quiet_hours_end: '07:00:00' },
+    members: (members || []).filter(member => !['guest', 'monitor'].includes(member.role))
+  });
+}
+
+export async function handleSetPushSettings(request, supabaseAdmin) {
+  const auth = await authenticateRequest(request, supabaseAdmin);
+  if (auth.error) return auth.error;
+  const body = await request.json().catch(() => ({}));
+  const vacationAll = body.push_vacation_all === true;
+  const vacationUserIds = Array.isArray(body.push_vacation_user_ids)
+    ? [...new Set(body.push_vacation_user_ids)]
+    : [];
+  if (vacationUserIds.length > 500 || vacationUserIds.some(userId => !isValidUuid(userId))) {
+    return jsonResponse({ error: '휴무 알림 대상이 올바르지 않습니다.' }, 400);
+  }
+  const quietEnabled = body.push_quiet_hours_enabled === true;
+  const quietStart = body.push_quiet_hours_start || null;
+  const quietEnd = body.push_quiet_hours_end || null;
+  if (quietEnabled && (!isValidTime(quietStart) || !isValidTime(quietEnd))) {
+    return jsonResponse({ error: '방해금지 시간은 HH:MM 형식으로 입력해 주세요.' }, 400);
+  }
+  if (vacationUserIds.length) {
+    const { data: members, error } = await supabaseAdmin.from('users').select('id').in('id', vacationUserIds);
+    if (error) throw error;
+    if ((members || []).length !== vacationUserIds.length) return jsonResponse({ error: '휴무 알림 대상에 없는 회원이 포함되어 있습니다.' }, 400);
+  }
+  const { data, error } = await supabaseAdmin
+    .from('user_settings')
+    .upsert({
+      user_id: auth.user.id,
+      push_vacation_all: vacationAll,
+      push_vacation_user_ids: vacationUserIds,
+      push_admin_notifications: body.push_admin_notifications === true,
+      push_quiet_hours_enabled: quietEnabled,
+      push_quiet_hours_start: quietEnabled ? quietStart : null,
+      push_quiet_hours_end: quietEnabled ? quietEnd : null,
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'user_id' })
+    .select(PUSH_SETTINGS_FIELDS)
+    .single();
+  if (error) throw error;
+  return jsonResponse({ success: true, settings: data });
+}
+
 export async function handleListNotifications(request, supabaseAdmin) {
   const auth = await authenticateRequest(request, supabaseAdmin);
   if (auth.error) return auth.error;
+
+  await deleteExpiredNotifications(supabaseAdmin, auth.user.id);
 
   const { data: notifications, error } = await supabaseAdmin
     .from('notifications')
