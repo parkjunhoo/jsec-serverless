@@ -67,6 +67,7 @@ import {
   handleSetPushSettings
 } from './api/push.js';
 import { handleGetWeather } from './api/weather.js';
+import { handleMcpRequest } from './api/mcp.js';
 
 export default {
   async fetch(request, env, ctx) {
@@ -76,7 +77,7 @@ export default {
     const corsHeaders = {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, Accept, MCP-Protocol-Version',
     };
     
     // 1. 브라우저 OPTIONS Preflight 요청 처리
@@ -84,6 +85,13 @@ export default {
       return new Response(null, {
         status: 204,
         headers: corsHeaders,
+      });
+    }
+
+    if (url.pathname === '/api/mcp' && request.method === 'GET') {
+      return new Response(null, {
+        status: 405,
+        headers: { ...corsHeaders, Allow: 'POST' }
       });
     }
 
@@ -119,6 +127,10 @@ export default {
       }
 
       const supabaseAdmin = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+
+      if (url.pathname === '/api/mcp' && request.method === 'POST') {
+        return await handleMcpRequest(request, supabaseAdmin, env, ctx);
+      }
 
       // 2. 로그인 라우팅
       if (url.pathname === '/api/login' && request.method === 'POST') {
