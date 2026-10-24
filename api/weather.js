@@ -1,13 +1,70 @@
 import { authenticateRequest, jsonResponse } from './push.js';
 
 const KMA_BASE_URL = 'https://apis.data.go.kr/1360000/VilageFcstInfoService_2.0';
-const LOCATION = {
+const DEFAULT_LOCATION = {
   name: '지산컨트리클럽',
   latitude: 37.2137,
-  longitude: 127.34099,
-  nx: 62,
-  ny: 117
+  longitude: 127.34099
 };
+const KMA_GRID = {
+  earthRadiusKm: 6371.00877,
+  spacingKm: 5,
+  standardLatitude1: 30,
+  standardLatitude2: 60,
+  originLongitude: 126,
+  originLatitude: 38,
+  originX: 43,
+  originY: 136
+};
+
+function toKmaGrid(latitude, longitude) {
+  const radians = degrees => degrees * Math.PI / 180;
+  const earthRadius = KMA_GRID.earthRadiusKm / KMA_GRID.spacingKm;
+  const standardLatitude1 = radians(KMA_GRID.standardLatitude1);
+  const standardLatitude2 = radians(KMA_GRID.standardLatitude2);
+  const originLatitude = radians(KMA_GRID.originLatitude);
+  const sn = Math.log(Math.cos(standardLatitude1) / Math.cos(standardLatitude2))
+    / Math.log(Math.tan(Math.PI / 4 + standardLatitude2 / 2) / Math.tan(Math.PI / 4 + standardLatitude1 / 2));
+  const sf = Math.tan(Math.PI / 4 + standardLatitude1 / 2) ** sn
+    * Math.cos(standardLatitude1) / sn;
+  const ro = earthRadius * sf / Math.tan(Math.PI / 4 + originLatitude / 2) ** sn;
+  const ra = earthRadius * sf / Math.tan(Math.PI / 4 + radians(latitude) / 2) ** sn;
+  let theta = longitude - KMA_GRID.originLongitude;
+  if (theta > 180) theta -= 360;
+  if (theta < -180) theta += 360;
+  theta = radians(theta) * sn;
+  return {
+    nx: Math.floor(ra * Math.sin(theta) + KMA_GRID.originX + 0.5),
+    ny: Math.floor(ro - ra * Math.cos(theta) + KMA_GRID.originY + 0.5)
+  };
+}
+
+function getRequestedLocation(url) {
+  const latitudeValue = url.searchParams.get('lat');
+  const longitudeValue = url.searchParams.get('lon');
+  if (latitudeValue === null && longitudeValue === null) {
+    return { ...DEFAULT_LOCATION, ...toKmaGrid(DEFAULT_LOCATION.latitude, DEFAULT_LOCATION.longitude) };
+  }
+  if (latitudeValue === null || longitudeValue === null) {
+    throw new Error('위도와 경도를 모두 입력해 주세요.');
+  }
+  const latitude = Number(latitudeValue);
+  const longitude = Number(longitudeValue);
+  if (!Number.isFinite(latitude) || latitude < 32 || latitude > 40
+    || !Number.isFinite(longitude) || longitude < 123 || longitude > 133) {
+    throw new Error('날씨 위치는 대한민국 내의 유효한 좌표로 지정해 주세요.');
+  }
+  const displayName = (url.searchParams.get('name') || '선택한 위치')
+    .replace(/[\u0000-\u001f\u007f]/g, '')
+    .trim()
+    .slice(0, 100);
+  return {
+    name: displayName || '선택한 위치',
+    latitude,
+    longitude,
+    ...toKmaGrid(latitude, longitude)
+  };
+}
 
 function getKoreaDateParts(date = new Date()) {
   return Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
@@ -64,7 +121,25 @@ function getForecastBaseTimes() {
   });
 }
 
-async function fetchKmaItems(endpoint, baseTimes, serviceKey) {
+function getVillageForecastBaseTimes() {
+  const target = shiftedDateTime(new Date(), -15);
+  const targetDate = new Date(Date.UTC(
+    Number(target.date.slice(0, 4)),
+    Number(target.date.slice(4, 6)) - 1,
+    Number(target.date.slice(6, 8)),
+    Number(target.time.slice(0, 2))
+  ));
+  const hour = targetDate.getUTCHours();
+  targetDate.setUTCHours(hour >= 2 ? 2 + Math.floor((hour - 2) / 3) * 3 : 23);
+  if (hour < 2) targetDate.setUTCDate(targetDate.getUTCDate() - 1);
+
+  return [0, -3, -6].map(offset => {
+    const value = formatDateTime(new Date(targetDate.getTime() + offset * 60 * 60 * 1000));
+    return { date: value.date, time: `${value.time.slice(0, 2)}00` };
+  });
+}
+
+async function fetchKmaItems(endpoint, baseTimes, serviceKey, location) {
   let lastError;
   for (const base of baseTimes) {
     const url = new URL(`${KMA_BASE_URL}/${endpoint}`);
@@ -75,8 +150,8 @@ async function fetchKmaItems(endpoint, baseTimes, serviceKey) {
       dataType: 'JSON',
       base_date: base.date,
       base_time: base.time,
-      nx: String(LOCATION.nx),
-      ny: String(LOCATION.ny)
+      nx: String(location.nx),
+      ny: String(location.ny)
     });
 
     try {
@@ -120,15 +195,21 @@ function formatForecastTime(item) {
   return `${String(hour).padStart(2, '0')}시`;
 }
 
-async function getWeather(serviceKey) {
-  const [observations, forecasts] = await Promise.all([
-    fetchKmaItems('getUltraSrtNcst', getObservationBaseTimes(), serviceKey),
-    fetchKmaItems('getUltraSrtFcst', getForecastBaseTimes(), serviceKey)
+async function getWeather(serviceKey, location) {
+  const [observations, shortForecasts, villageForecasts] = await Promise.all([
+    fetchKmaItems('getUltraSrtNcst', getObservationBaseTimes(), serviceKey, location),
+    fetchKmaItems('getUltraSrtFcst', getForecastBaseTimes(), serviceKey, location),
+    fetchKmaItems('getVilageFcst', getVillageForecastBaseTimes(), serviceKey, location)
   ]);
 
   const observedValues = groupByCategory(observations.items);
   const forecastByTime = new Map();
-  for (const item of forecasts.items) {
+  for (const item of villageForecasts.items) {
+    const key = `${item.fcstDate}${item.fcstTime}`;
+    if (!forecastByTime.has(key)) forecastByTime.set(key, new Map());
+    forecastByTime.get(key).set(item.category, item.fcstValue);
+  }
+  for (const item of shortForecasts.items) {
     const key = `${item.fcstDate}${item.fcstTime}`;
     if (!forecastByTime.has(key)) forecastByTime.set(key, new Map());
     forecastByTime.get(key).set(item.category, item.fcstValue);
@@ -139,14 +220,16 @@ async function getWeather(serviceKey) {
   const hourly = [...forecastByTime.entries()]
     .filter(([key]) => key >= nowKey)
     .sort(([first], [second]) => first.localeCompare(second))
-    .slice(0, 8)
+    .slice(0, 48)
     .map(([key, values]) => {
       const condition = getCondition(values.get('SKY'), values.get('PTY'));
       return {
         date: key.slice(0, 8),
         time: `${key.slice(8, 10)}${key.slice(10, 12)}`,
-        label: `${key.slice(8, 10)}시`,
-        temperature: values.get('T1H') ?? null,
+        label: key.slice(0, 8) === `${now.year}${now.month}${now.day}`
+          ? `${key.slice(8, 10)}시`
+          : `${key.slice(4, 6)}.${key.slice(6, 8)} ${key.slice(8, 10)}시`,
+        temperature: values.get('TMP') ?? values.get('T1H') ?? null,
         condition: condition.text,
         icon: condition.icon,
         precipitation: values.get('RN1') ?? '강수 없음',
@@ -159,7 +242,7 @@ async function getWeather(serviceKey) {
     .sort(([first], [second]) => first.localeCompare(second))[0]?.[1];
   const condition = getCondition(nearestForecast?.get('SKY'), observedValues.get('PTY'));
   return {
-    location: LOCATION.name,
+    location: location.name,
     provider: '기상청 동네예보',
     observedAt: `${observations.base.date}T${observations.base.time}`,
     updatedAt: new Date().toISOString(),
@@ -178,19 +261,31 @@ async function getWeather(serviceKey) {
 export async function handleGetWeather(request, supabaseAdmin, env, ctx) {
   const auth = await authenticateRequest(request, supabaseAdmin);
   if (auth.error) return auth.error;
+  let location;
+  try {
+    location = getRequestedLocation(new URL(request.url));
+  } catch (error) {
+    return jsonResponse({ error: error.message }, 400);
+  }
   if (!env.KMA_SERVICE_KEY) {
     return jsonResponse({ error: '기상청 API 키가 Worker의 KMA_SERVICE_KEY 비밀 변수에 설정되지 않았습니다.' }, 503);
   }
 
   const cache = globalThis.caches?.default;
-  const cacheKey = new Request('https://jsec-weather-cache.internal/api/weather');
+  const cacheKey = new Request(`https://jsec-weather-cache.internal/api/weather?nx=${location.nx}&ny=${location.ny}`);
   if (cache) {
     const cachedResponse = await cache.match(cacheKey);
-    if (cachedResponse) return cachedResponse;
+    if (cachedResponse) {
+      const weather = await cachedResponse.json();
+      weather.location = location.name;
+      return new Response(JSON.stringify(weather), {
+        headers: cachedResponse.headers
+      });
+    }
   }
 
   try {
-    const weather = await getWeather(env.KMA_SERVICE_KEY);
+    const weather = await getWeather(env.KMA_SERVICE_KEY, location);
     const response = new Response(JSON.stringify(weather), {
       headers: {
         'Content-Type': 'application/json',
