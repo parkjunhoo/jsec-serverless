@@ -252,7 +252,6 @@ export async function handleAttendancePunch(request, supabaseAdmin, action) {
       .not('latitude', 'is', null)
       .not('longitude', 'is', null)
       .order('site_number', { ascending: true });
-    if (action === 'check-out') siteQuery = siteQuery.eq('id', existing.location_id);
     const { data: configuredSites, error: siteError } = await siteQuery;
     if (siteError) throw siteError;
 
@@ -267,7 +266,7 @@ export async function handleAttendancePunch(request, supabaseAdmin, action) {
     if (!match) {
       return jsonResponse({
         error: action === 'check-out'
-          ? '퇴근은 출근을 등록한 출근지 반경 안에서 해 주세요.'
+          ? '등록된 출근지 반경 안에서 퇴근할 수 있습니다.'
           : '등록된 출근지 반경 안에서만 출근할 수 있습니다.'
       }, 403);
     }
@@ -432,22 +431,20 @@ export async function handleCreateManualAttendanceRecord(request, supabaseAdmin)
     const body = await parseBody(request);
     if (!body || !UUID_PATTERN.test(body.user_id || '') || !UUID_PATTERN.test(body.location_id || '')
       || typeof body.check_in_at !== 'string'
-      || (body.check_out_at != null && body.check_out_at !== '' && typeof body.check_out_at !== 'string')
-      || typeof body.reason !== 'string') {
-      return jsonResponse({ error: '직원, 출근지, 출퇴근 시각과 추가 사유를 확인해 주세요.' }, 400);
+      || (body.check_out_at != null && body.check_out_at !== '' && typeof body.check_out_at !== 'string')) {
+      return jsonResponse({ error: '직원, 출근지와 출퇴근 시각을 확인해 주세요.' }, 400);
     }
 
     const checkInAt = parseKoreaDateTime(body.check_in_at);
     const hasCheckOut = typeof body.check_out_at === 'string' && body.check_out_at !== '';
     const checkOutAt = hasCheckOut ? parseKoreaDateTime(body.check_out_at) : null;
-    const reason = body.reason.trim();
     const note = typeof body.note === 'string' ? body.note.trim() : '';
     if (!checkInAt || (hasCheckOut && !checkOutAt)
       || (checkOutAt && checkOutAt < checkInAt)) {
       return jsonResponse({ error: '출퇴근 시각을 올바르게 입력해 주세요.' }, 400);
     }
-    if (!reason || reason.length > 500 || note.length > 1000) {
-      return jsonResponse({ error: '추가 사유는 1~500자, 메모는 1000자 이내로 입력해 주세요.' }, 400);
+    if (note.length > 1000) {
+      return jsonResponse({ error: '메모는 1000자 이내로 입력해 주세요.' }, 400);
     }
 
     const [{ data: user, error: userError }, { data: site, error: siteError }] = await Promise.all([
@@ -474,7 +471,6 @@ export async function handleCreateManualAttendanceRecord(request, supabaseAdmin)
       p_check_in_at: checkInAt,
       p_check_out_at: checkOutAt,
       p_note: note,
-      p_reason: reason,
       p_admin_id: auth.user.id
     });
     if (error) throw error;

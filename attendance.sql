@@ -380,6 +380,8 @@ BEGIN
 END;
 $$;
 
+DROP FUNCTION IF EXISTS public.create_manual_attendance_record(uuid, text, uuid, timestamptz, timestamptz, text, text, uuid);
+
 CREATE OR REPLACE FUNCTION public.create_manual_attendance_record(
   p_user_id uuid,
   p_username text,
@@ -387,7 +389,6 @@ CREATE OR REPLACE FUNCTION public.create_manual_attendance_record(
   p_check_in_at timestamptz,
   p_check_out_at timestamptz,
   p_note text,
-  p_reason text,
   p_admin_id uuid
 )
 RETURNS public.attendance_records
@@ -399,9 +400,6 @@ DECLARE
   selected_site public.attendance_sites%ROWTYPE;
   new_record public.attendance_records%ROWTYPE;
 BEGIN
-  IF length(trim(COALESCE(p_reason, ''))) NOT BETWEEN 1 AND 500 THEN
-    RAISE EXCEPTION '추가 사유를 1~500자로 입력해 주세요.';
-  END IF;
   IF length(COALESCE(p_note, '')) > 1000 THEN
     RAISE EXCEPTION '메모는 1000자 이내로 입력해 주세요.';
   END IF;
@@ -449,16 +447,6 @@ BEGIN
   )
   RETURNING * INTO new_record;
 
-  INSERT INTO public.attendance_record_audit (
-    record_id, changed_by, reason, before_value, after_value
-  )
-  VALUES (
-    new_record.id,
-    p_admin_id,
-    '[관리자 추가] ' || trim(p_reason),
-    '{}'::jsonb,
-    to_jsonb(new_record)
-  );
   RETURN new_record;
 END;
 $$;
@@ -476,10 +464,10 @@ REVOKE ALL ON FUNCTION public.delete_attendance_record(uuid, text, uuid)
   FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.delete_attendance_record(uuid, text, uuid) TO service_role;
 REVOKE ALL ON FUNCTION public.create_manual_attendance_record(
-  uuid, text, uuid, timestamptz, timestamptz, text, text, uuid
+  uuid, text, uuid, timestamptz, timestamptz, text, uuid
 ) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.create_manual_attendance_record(
-  uuid, text, uuid, timestamptz, timestamptz, text, text, uuid
+  uuid, text, uuid, timestamptz, timestamptz, text, uuid
 ) TO service_role;
 
 NOTIFY pgrst, 'reload schema';
