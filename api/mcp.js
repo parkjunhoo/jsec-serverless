@@ -133,15 +133,15 @@ const MCP_TOOLS = [
   },
   {
     name: 'delete_my_days_off',
-    title: '기간 내 내 휴무 일괄 삭제',
-    description: '본인의 일반 휴무를 기간 단위로 삭제하는 유일한 삭제 도구입니다. 단일 날짜 삭제도 start와 end를 같은 날짜로 지정해 이 도구를 사용하세요. 여러 일정 또는 "이번 달/12월 휴무 다 삭제" 요청은 반드시 해당 월 전체 시작일과 마지막 날을 start/end로 지정해 한 번만 호출하세요. 단건 delete_my_day_off 도구는 없습니다. vacation_id는 전달하지 마세요. 승인 연차는 유지하고 제외 건수를 안내합니다. 화면 확인 버튼을 누르기 전에는 실제로 삭제되지 않습니다.',
+    title: '내 월간 휴무 일괄 삭제',
+    description: '로그인한 본인의 지정 월에 등록된 일반 휴무를 한 번에 삭제하는 유일한 휴무 삭제 도구입니다. "내 12월 휴무 다 지워줘"처럼 요청하면 현재 한국시간 기준 연도와 요청한 월을 year/month로 지정해 이 도구를 정확히 한 번 호출하세요. 삭제할 날짜를 각각 호출하지 말고 vacation_id도 전달하지 마세요. 승인 연차는 유지하고 제외 건수를 안내합니다. 화면 확인 버튼을 누르기 전에는 실제 삭제되지 않습니다.',
     inputSchema: {
       type: 'object',
       properties: {
-        start: { type: 'string', description: '삭제 기간 시작일 (YYYY-MM-DD)' },
-        end: { type: 'string', description: '삭제 기간 종료일 (YYYY-MM-DD)' }
+        year: { type: 'integer', description: '삭제할 연도 (현재 한국시간 기준)' },
+        month: { type: 'integer', description: '삭제할 월 (1~12)' }
       },
-      required: ['start', 'end'],
+      required: ['year', 'month'],
       additionalProperties: false
     },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false }
@@ -538,6 +538,22 @@ function koreaDateString(date = new Date()) {
   }).format(date);
 }
 
+function formatKoreaDateTime(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) throw new Error('근태 기록의 시간이 올바르지 않습니다.');
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Seoul',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23'
+  }).formatToParts(date).map(part => [part.type, part.value]));
+  return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute} KST`;
+}
+
 function getMonday(value) {
   if (!isValidDate(value)) throw new Error('식단표 날짜가 올바르지 않습니다.');
   const [year, month, day] = value.split('-').map(Number);
@@ -676,7 +692,11 @@ async function readMyAttendance(supabaseAdmin, userId, args) {
     .order('work_date', { ascending: false })
     .limit(100);
   if (error) throw error;
-  return data || [];
+  return (data || []).map(record => ({
+    ...record,
+    check_in_at: formatKoreaDateTime(record.check_in_at),
+    check_out_at: formatKoreaDateTime(record.check_out_at)
+  }));
 }
 
 async function readMyAnnualLeave(request, supabaseAdmin, userId) {
@@ -754,37 +774,20 @@ async function callTool(request, supabaseAdmin, env, context, auth, name, args) 
       if (!response.ok) throw new Error(result.error || '휴무를 수정하지 못했습니다.');
       return { message: '본인 휴무를 수정했습니다.', vacation: result.vacation };
     }
-    case 'delete_my_day_off': {
-      const vacationId = args.vacation_id;
-      if (typeof vacationId !== 'string' || !UUID_PATTERN.test(vacationId) || !isValidDate(args.date)) {
-        throw new Error('휴무 ID 또는 날짜가 올바르지 않습니다.');
-      }
-      const { data: vacation, error: lookupError } = await supabaseAdmin
-        .from('vacations')
-        .select('leave_type')
-        .eq('id', vacationId)
-        .eq('user_id', auth.user.id)
-        .eq('date', args.date)
-        .maybeSingle();
-      if (lookupError) throw lookupError;
-      if (!vacation) throw new Error('해당 날짜의 본인 휴무 일정을 찾을 수 없습니다.');
-      if (vacation.leave_type === '연차') throw new Error('승인된 연차 일정은 연차 신청 메뉴에서 취소할 수 있습니다.');
-      const response = await handleDeleteVacation(
-        getInternalRequest(request, `/api/vacations/${vacationId}`, 'DELETE'),
-        supabaseAdmin, env, context, String(vacationId)
-      );
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || '휴무를 삭제하지 못했습니다.');
-      return result;
-    }
     case 'delete_my_days_off': {
-      validateDateRange(args.start, args.end);
+      if (!Number.isInteger(args.year) || args.year < 2000 || args.year > 2100
+        || !Number.isInteger(args.month) || args.month < 1 || args.month > 12) {
+        throw new Error('삭제할 연도와 월이 올바르지 않습니다.');
+      }
+      const start = `${args.year}-${String(args.month).padStart(2, '0')}-01`;
+      const endDate = new Date(Date.UTC(args.year, args.month, 0));
+      const end = `${args.year}-${String(args.month).padStart(2, '0')}-${String(endDate.getUTCDate()).padStart(2, '0')}`;
       const { data: vacations, error: lookupError } = await supabaseAdmin
         .from('vacations')
         .select('id, date, leave_type')
         .eq('user_id', auth.user.id)
-        .gte('date', args.start)
-        .lte('date', args.end)
+        .gte('date', start)
+        .lte('date', end)
         .order('date', { ascending: true })
         .limit(101);
       if (lookupError) throw lookupError;
