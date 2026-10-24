@@ -147,6 +147,10 @@ export default {
         return await handleListUsers(request, supabaseAdmin);
       }
 
+      if (url.pathname === '/api/users/spreadsheet' && request.method === 'GET') {
+        return await handleListUsers(request, supabaseAdmin, true);
+      }
+
       if (url.pathname === '/api/weather' && request.method === 'GET') {
         return await handleGetWeather(request, supabaseAdmin, env, ctx);
       }

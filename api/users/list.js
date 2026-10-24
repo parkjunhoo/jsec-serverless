@@ -1,9 +1,12 @@
 import { authenticateRequest, jsonResponse } from '../push.js';
 
-export async function handleListUsers(request, supabaseAdmin) {
+export async function handleListUsers(request, supabaseAdmin, adminOnly = false) {
   try {
     const auth = await authenticateRequest(request, supabaseAdmin);
     if (auth.error) return auth.error;
+    if (adminOnly && auth.profile.role !== 'admin') {
+      return jsonResponse({ error: '관리자만 회원 엑셀 데이터를 조회할 수 있습니다.' }, 403);
+    }
 
     const { data, error } = await supabaseAdmin
       .from('users')

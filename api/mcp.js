@@ -615,7 +615,7 @@ async function readWeather(request, supabaseAdmin, env, context, args) {
     provider: result.provider,
     observedAt: result.observedAt,
     current: result.current,
-    hourly: (result.hourly || []).slice(0, 16)
+    hourly: result.hourly || []
   };
 }
 

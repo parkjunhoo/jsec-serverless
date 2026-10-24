@@ -51,7 +51,7 @@ export async function handleUpdateUser(request, supabaseAdmin, userId) {
       if (targetProfileError) throw targetProfileError;
       if (!targetProfile) return jsonResponse({ error: '회원을 찾을 수 없습니다.' }, 404);
       targetRole = targetProfile.role;
-      if (isGuestRole(targetRole) !== (body.role === 'guest')) {
+      if (Object.hasOwn(body, 'role') && isGuestRole(targetRole) !== isGuestRole(body.role)) {
         return jsonResponse({ error: '게스트 계정의 권한은 게스트로 유지해야 합니다.' }, 400);
       }
     }
