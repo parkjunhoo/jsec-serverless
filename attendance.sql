@@ -56,9 +56,11 @@ CREATE TABLE IF NOT EXISTS public.attendance_records (
   check_out_longitude double precision,
   check_out_device jsonb,
   note text NOT NULL DEFAULT '',
+  deleted_at timestamptz,
+  deleted_by uuid REFERENCES public.users(id) ON DELETE RESTRICT,
+  delete_reason text,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (user_id, work_date),
   CHECK (check_out_at IS NULL OR check_out_at >= check_in_at)
 );
 
@@ -68,7 +70,31 @@ ALTER TABLE public.attendance_records
   ADD COLUMN IF NOT EXISTS check_in_device jsonb,
   ADD COLUMN IF NOT EXISTS check_out_latitude double precision,
   ADD COLUMN IF NOT EXISTS check_out_longitude double precision,
-  ADD COLUMN IF NOT EXISTS check_out_device jsonb;
+  ADD COLUMN IF NOT EXISTS check_out_device jsonb,
+  ADD COLUMN IF NOT EXISTS deleted_at timestamptz,
+  ADD COLUMN IF NOT EXISTS deleted_by uuid REFERENCES public.users(id) ON DELETE RESTRICT,
+  ADD COLUMN IF NOT EXISTS delete_reason text;
+
+DO $$
+DECLARE
+  unique_constraint record;
+BEGIN
+  FOR unique_constraint IN
+    SELECT c.conname
+    FROM pg_constraint c
+    WHERE c.conrelid = 'public.attendance_records'::regclass
+      AND c.contype = 'u'
+      AND (
+        SELECT array_agg(a.attname ORDER BY a.attname)
+        FROM unnest(c.conkey) AS key_column(attnum)
+        JOIN pg_attribute a
+          ON a.attrelid = c.conrelid AND a.attnum = key_column.attnum
+      ) = ARRAY['user_id', 'work_date']::name[]
+  LOOP
+    EXECUTE format('ALTER TABLE public.attendance_records DROP CONSTRAINT %I', unique_constraint.conname);
+  END LOOP;
+END;
+$$;
 
 DO $$
 BEGIN
@@ -306,6 +332,137 @@ BEGIN
 END;
 $$;
 
+CREATE OR REPLACE FUNCTION public.delete_attendance_record(
+  p_record_id uuid,
+  p_reason text,
+  p_admin_id uuid
+)
+RETURNS public.attendance_records
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  old_record public.attendance_records%ROWTYPE;
+  deleted_record public.attendance_records%ROWTYPE;
+BEGIN
+  IF length(trim(COALESCE(p_reason, ''))) NOT BETWEEN 1 AND 500 THEN
+    RAISE EXCEPTION '삭제 사유를 1~500자로 입력해 주세요.';
+  END IF;
+
+  SELECT * INTO old_record
+  FROM public.attendance_records
+  WHERE id = p_record_id AND deleted_at IS NULL
+  FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION '근태 기록을 찾을 수 없거나 이미 삭제되었습니다.';
+  END IF;
+
+  UPDATE public.attendance_records
+  SET deleted_at = now(),
+      deleted_by = p_admin_id,
+      delete_reason = trim(p_reason),
+      updated_at = now()
+  WHERE id = p_record_id
+  RETURNING * INTO deleted_record;
+
+  INSERT INTO public.attendance_record_audit (
+    record_id, changed_by, reason, before_value, after_value
+  )
+  VALUES (
+    deleted_record.id,
+    p_admin_id,
+    '[삭제] ' || trim(p_reason),
+    to_jsonb(old_record),
+    to_jsonb(deleted_record)
+  );
+  RETURN deleted_record;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.create_manual_attendance_record(
+  p_user_id uuid,
+  p_username text,
+  p_location_id uuid,
+  p_check_in_at timestamptz,
+  p_check_out_at timestamptz,
+  p_note text,
+  p_reason text,
+  p_admin_id uuid
+)
+RETURNS public.attendance_records
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  selected_site public.attendance_sites%ROWTYPE;
+  new_record public.attendance_records%ROWTYPE;
+BEGIN
+  IF length(trim(COALESCE(p_reason, ''))) NOT BETWEEN 1 AND 500 THEN
+    RAISE EXCEPTION '추가 사유를 1~500자로 입력해 주세요.';
+  END IF;
+  IF length(COALESCE(p_note, '')) > 1000 THEN
+    RAISE EXCEPTION '메모는 1000자 이내로 입력해 주세요.';
+  END IF;
+  IF p_check_in_at IS NULL OR (p_check_out_at IS NOT NULL AND p_check_out_at < p_check_in_at) THEN
+    RAISE EXCEPTION '출퇴근 시각을 올바르게 입력해 주세요.';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM public.users
+    WHERE id = p_user_id
+      AND role NOT IN ('guest', 'monitor')
+      AND (status IS NULL OR status <> '퇴직')
+  ) THEN
+    RAISE EXCEPTION '근태 기록을 추가할 수 있는 재직 직원을 선택해 주세요.';
+  END IF;
+  IF p_check_out_at IS NULL AND EXISTS (
+    SELECT 1 FROM public.attendance_records
+    WHERE user_id = p_user_id
+      AND check_out_at IS NULL
+      AND deleted_at IS NULL
+  ) THEN
+    RAISE EXCEPTION '해당 직원에게 퇴근하지 않은 근무 기록이 있습니다.';
+  END IF;
+
+  SELECT * INTO selected_site
+  FROM public.attendance_sites
+  WHERE id = p_location_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION '출근지를 찾을 수 없습니다.';
+  END IF;
+
+  INSERT INTO public.attendance_records (
+    user_id, username, location_id, location_name, work_date,
+    check_in_at, check_in_accuracy_m, check_in_distance_m,
+    check_out_at, check_out_accuracy_m, check_out_distance_m,
+    note, updated_at
+  )
+  VALUES (
+    p_user_id, COALESCE(NULLIF(trim(p_username), ''), '회원'),
+    selected_site.id, selected_site.name,
+    (p_check_in_at AT TIME ZONE 'Asia/Seoul')::date,
+    p_check_in_at, 0, 0,
+    p_check_out_at, CASE WHEN p_check_out_at IS NULL THEN NULL ELSE 0 END,
+    CASE WHEN p_check_out_at IS NULL THEN NULL ELSE 0 END,
+    COALESCE(p_note, ''), now()
+  )
+  RETURNING * INTO new_record;
+
+  INSERT INTO public.attendance_record_audit (
+    record_id, changed_by, reason, before_value, after_value
+  )
+  VALUES (
+    new_record.id,
+    p_admin_id,
+    '[관리자 추가] ' || trim(p_reason),
+    '{}'::jsonb,
+    to_jsonb(new_record)
+  );
+  RETURN new_record;
+END;
+$$;
+
 REVOKE ALL ON FUNCTION public.save_attendance_sites(jsonb, uuid)
   FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.save_attendance_sites(jsonb, uuid) TO service_role;
@@ -314,6 +471,15 @@ REVOKE ALL ON FUNCTION public.correct_attendance_record(
 ) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.correct_attendance_record(
   uuid, uuid, timestamptz, timestamptz, text, text, uuid
+) TO service_role;
+REVOKE ALL ON FUNCTION public.delete_attendance_record(uuid, text, uuid)
+  FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.delete_attendance_record(uuid, text, uuid) TO service_role;
+REVOKE ALL ON FUNCTION public.create_manual_attendance_record(
+  uuid, text, uuid, timestamptz, timestamptz, text, text, uuid
+) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.create_manual_attendance_record(
+  uuid, text, uuid, timestamptz, timestamptz, text, text, uuid
 ) TO service_role;
 
 NOTIFY pgrst, 'reload schema';

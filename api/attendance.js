@@ -3,6 +3,7 @@ import { authenticateRequest, jsonResponse } from './push.js';
 const SITE_FIELDS = 'id, site_number, name, latitude, longitude, radius_m, enabled, updated_at';
 const RECORD_FIELDS = 'id, user_id, username, location_id, location_name, work_date, check_in_at, check_in_accuracy_m, check_in_distance_m, check_in_latitude, check_in_longitude, check_in_device, check_out_at, check_out_accuracy_m, check_out_distance_m, check_out_latitude, check_out_longitude, check_out_device, note, created_at, updated_at';
 const MAX_LOCATION_ACCURACY_M = 100;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function isAdmin(auth) {
   return auth.profile.role === 'admin';
@@ -173,6 +174,7 @@ export async function handleListAttendanceRecords(request, supabaseAdmin) {
       .select(RECORD_FIELDS)
       .gte('work_date', start)
       .lte('work_date', end)
+      .is('deleted_at', null)
       .order('work_date', { ascending: false })
       .order('check_in_at', { ascending: false })
       .limit(5000);
@@ -223,6 +225,7 @@ export async function handleAttendancePunch(request, supabaseAdmin, action) {
       .select('id, location_id, work_date, check_in_at')
       .eq('user_id', employee.auth.user.id)
       .is('check_out_at', null)
+      .is('deleted_at', null)
       .order('check_in_at', { ascending: false })
       .limit(2);
     if (lookupError) throw lookupError;
@@ -294,9 +297,7 @@ export async function handleAttendancePunch(request, supabaseAdmin, action) {
         })
         .select(RECORD_FIELDS)
         .single();
-      if (error?.code === '23505') {
-        return jsonResponse({ error: '오늘 출근 기록이 이미 있습니다.' }, 409);
-      }
+      if (error?.code === '23505') return jsonResponse({ error: '출근 기록을 저장하지 못했습니다. 새로고침 후 다시 시도해 주세요.' }, 409);
       if (error) throw error;
       return jsonResponse({ record: omitGpsCoordinates(data) });
     }
@@ -332,9 +333,10 @@ export async function handleCorrectAttendanceRecord(request, supabaseAdmin, reco
     const auth = await authenticateRequest(request, supabaseAdmin);
     if (auth.error) return auth.error;
     if (!isAdmin(auth)) return jsonResponse({ error: '관리자만 근태 기록을 수정할 수 있습니다.' }, 403);
-    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(recordId || '')) {
+    if (!UUID_PATTERN.test(recordId || '')) {
       return jsonResponse({ error: '근태 기록 ID가 올바르지 않습니다.' }, 400);
     }
+
     const body = await parseBody(request);
     if (!body || typeof body.location_id !== 'string'
       || typeof body.check_in_at !== 'string'
@@ -379,5 +381,106 @@ export async function handleCorrectAttendanceRecord(request, supabaseAdmin, reco
   } catch (error) {
     console.error('근태 기록 수정 오류:', error);
     return jsonResponse({ error: error.message || '근태 기록을 수정하지 못했습니다.' }, 500);
+  }
+}
+
+export async function handleDeleteAttendanceRecord(request, supabaseAdmin, recordId) {
+  try {
+    const auth = await authenticateRequest(request, supabaseAdmin);
+    if (auth.error) return auth.error;
+    if (!isAdmin(auth)) return jsonResponse({ error: '관리자만 근태 기록을 삭제할 수 있습니다.' }, 403);
+    if (!UUID_PATTERN.test(recordId || '')) {
+      return jsonResponse({ error: '근태 기록 ID가 올바르지 않습니다.' }, 400);
+    }
+
+    const body = await parseBody(request);
+    const reason = typeof body?.reason === 'string' ? body.reason.trim() : '';
+    if (!reason || reason.length > 500) {
+      return jsonResponse({ error: '삭제 사유를 1~500자로 입력해 주세요.' }, 400);
+    }
+
+    const { data, error } = await supabaseAdmin.rpc('delete_attendance_record', {
+      p_record_id: recordId,
+      p_reason: reason,
+      p_admin_id: auth.user.id
+    });
+    if (error) throw error;
+    return jsonResponse({ success: true, record: data });
+  } catch (error) {
+    console.error('근태 기록 삭제 오류:', error);
+    return jsonResponse({ error: error.message || '근태 기록을 삭제하지 못했습니다.' }, 500);
+  }
+}
+
+function parseKoreaDateTime(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value || '');
+  if (!match) return null;
+  const [, year, month, day, hour, minute] = match;
+  const calendarDate = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+  if (calendarDate.toISOString().slice(0, 10) !== `${year}-${month}-${day}`
+    || Number(hour) > 23 || Number(minute) > 59) return null;
+  const date = new Date(`${value}:00+09:00`);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+export async function handleCreateManualAttendanceRecord(request, supabaseAdmin) {
+  try {
+    const auth = await authenticateRequest(request, supabaseAdmin);
+    if (auth.error) return auth.error;
+    if (!isAdmin(auth)) return jsonResponse({ error: '관리자만 근태 기록을 추가할 수 있습니다.' }, 403);
+
+    const body = await parseBody(request);
+    if (!body || !UUID_PATTERN.test(body.user_id || '') || !UUID_PATTERN.test(body.location_id || '')
+      || typeof body.check_in_at !== 'string'
+      || (body.check_out_at != null && body.check_out_at !== '' && typeof body.check_out_at !== 'string')
+      || typeof body.reason !== 'string') {
+      return jsonResponse({ error: '직원, 출근지, 출퇴근 시각과 추가 사유를 확인해 주세요.' }, 400);
+    }
+
+    const checkInAt = parseKoreaDateTime(body.check_in_at);
+    const hasCheckOut = typeof body.check_out_at === 'string' && body.check_out_at !== '';
+    const checkOutAt = hasCheckOut ? parseKoreaDateTime(body.check_out_at) : null;
+    const reason = body.reason.trim();
+    const note = typeof body.note === 'string' ? body.note.trim() : '';
+    if (!checkInAt || (hasCheckOut && !checkOutAt)
+      || (checkOutAt && checkOutAt < checkInAt)) {
+      return jsonResponse({ error: '출퇴근 시각을 올바르게 입력해 주세요.' }, 400);
+    }
+    if (!reason || reason.length > 500 || note.length > 1000) {
+      return jsonResponse({ error: '추가 사유는 1~500자, 메모는 1000자 이내로 입력해 주세요.' }, 400);
+    }
+
+    const [{ data: user, error: userError }, { data: site, error: siteError }] = await Promise.all([
+      supabaseAdmin.from('users')
+        .select('id, name, username, role, status')
+        .eq('id', body.user_id)
+        .maybeSingle(),
+      supabaseAdmin.from('attendance_sites')
+        .select('id, name')
+        .eq('id', body.location_id)
+        .maybeSingle()
+    ]);
+    if (userError) throw userError;
+    if (siteError) throw siteError;
+    if (!user || ['guest', 'monitor'].includes(user.role) || user.status === '퇴직') {
+      return jsonResponse({ error: '근태 기록을 추가할 수 있는 재직 직원을 선택해 주세요.' }, 400);
+    }
+    if (!site) return jsonResponse({ error: '선택한 출근지를 찾을 수 없습니다.' }, 400);
+
+    const { data, error } = await supabaseAdmin.rpc('create_manual_attendance_record', {
+      p_user_id: user.id,
+      p_username: user.name || user.username || '회원',
+      p_location_id: site.id,
+      p_check_in_at: checkInAt,
+      p_check_out_at: checkOutAt,
+      p_note: note,
+      p_reason: reason,
+      p_admin_id: auth.user.id
+    });
+    if (error) throw error;
+    return jsonResponse({ record: data });
+  } catch (error) {
+    console.error('관리자 근태 기록 추가 오류:', error);
+    return jsonResponse({ error: error.message || '근태 기록을 추가하지 못했습니다.' }, 500);
   }
 }

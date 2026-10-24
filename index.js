@@ -47,6 +47,8 @@ import {
 import {
   handleAttendancePunch,
   handleCorrectAttendanceRecord,
+  handleCreateManualAttendanceRecord,
+  handleDeleteAttendanceRecord,
   handleListAttendanceRecords,
   handleListAttendanceSites,
   handleSaveAttendanceSites
@@ -92,6 +94,19 @@ export default {
       return new Response(JSON.stringify({ error: '이 기능은 현재 비활성화되어 있습니다.' }), {
         status: 410,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
+    if (url.pathname === '/api/map-config' && request.method === 'GET') {
+      const appKey = env.KAKAO_MAP_JAVASCRIPT_KEY;
+      if (!appKey) {
+        return new Response(JSON.stringify({ error: '카카오 지도 JavaScript 키가 Worker의 KAKAO_MAP_JAVASCRIPT_KEY 변수에 설정되지 않았습니다.' }), {
+          status: 503,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
+        });
+      }
+      return new Response(JSON.stringify({ appKey }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=300' }
       });
     }
 
@@ -214,9 +229,16 @@ export default {
       if (url.pathname === '/api/attendance/records' && request.method === 'GET') {
         return await handleListAttendanceRecords(request, supabaseAdmin);
       }
+      if (url.pathname === '/api/attendance/records' && request.method === 'POST') {
+        return await handleCreateManualAttendanceRecord(request, supabaseAdmin);
+      }
       if (url.pathname.startsWith('/api/attendance/records/') && request.method === 'PATCH') {
         const recordId = decodeURIComponent(url.pathname.slice('/api/attendance/records/'.length));
         return await handleCorrectAttendanceRecord(request, supabaseAdmin, recordId);
+      }
+      if (url.pathname.startsWith('/api/attendance/records/') && request.method === 'DELETE') {
+        const recordId = decodeURIComponent(url.pathname.slice('/api/attendance/records/'.length));
+        return await handleDeleteAttendanceRecord(request, supabaseAdmin, recordId);
       }
       if (url.pathname === '/api/attendance/check-in' && request.method === 'POST') {
         return await handleAttendancePunch(request, supabaseAdmin, 'check-in');
