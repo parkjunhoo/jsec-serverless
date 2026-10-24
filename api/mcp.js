@@ -11,8 +11,10 @@ import { handleGetWeather } from './weather.js';
 const MCP_PROTOCOL_VERSION = '2025-03-26';
 const SUPPORTED_PROTOCOL_VERSIONS = new Set(['2025-03-26', '2025-06-18', '2025-11-25']);
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DAY_OFF_TOOL = 'create_my_days_off';
 const ADMIN_ONLY_TOOLS = new Set([
+  'list_employees',
   'search_employees',
   'get_employee_attendance',
   'list_employee_days_off',
@@ -39,6 +41,23 @@ const MCP_TOOLS = [
       additionalProperties: false
     },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false }
+  },
+  {
+    name: 'suggest_my_days_off',
+    title: '조건에 맞는 휴무 날짜 추천',
+    description: '사용자가 골프장 야간 근무자 및 지정 직원의 휴무일과 겹치지 않도록 무작위 휴무를 요청하면 호출합니다. 본인, 골프장 야간 근무자, exclude_name 직원의 해당 월 기존 휴무를 확인해 조건에 맞는 날짜를 추천합니다. 이 도구는 조회만 합니다. 사용자가 휴무 등록도 요청했다면 반환된 날짜를 create_my_days_off에 전달해 확인 버튼을 받으세요.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        year: { type: 'integer', description: '요청한 연도' },
+        month: { type: 'integer', description: '요청한 월 (1~12)' },
+        count: { type: 'integer', description: '추천할 날짜 개수 (1~31)' },
+        exclude_name: { type: 'string', description: '휴무일이 겹치지 않게 할 직원 이름' }
+      },
+      required: ['year', 'month', 'count', 'exclude_name'],
+      additionalProperties: false
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false }
   },
   {
     name: 'list_my_days_off',
@@ -99,7 +118,7 @@ const MCP_TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        vacation_id: { type: 'integer', description: '내 휴무 조회 결과의 id' },
+        vacation_id: { type: 'string', format: 'uuid', description: '내 휴무 조회 결과의 UUID id' },
         old_date: { type: 'string', description: '수정할 일정의 현재 날짜 (YYYY-MM-DD)' },
         date: { type: 'string', description: '변경할 날짜 (YYYY-MM-DD)' },
         leave_type: { type: 'string', enum: ['휴무', '시간차', '공가'] },
@@ -113,16 +132,16 @@ const MCP_TOOLS = [
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false }
   },
   {
-    name: 'delete_my_day_off',
-    title: '내 휴무 삭제',
-    description: '휴무 조회 결과의 vacation_id로 본인 일정을 삭제합니다. 실행 전 화면 확인 버튼이 한 번 표시됩니다.',
+    name: 'delete_my_days_off',
+    title: '기간 내 내 휴무 일괄 삭제',
+    description: '본인의 일반 휴무를 기간 단위로 삭제하는 유일한 삭제 도구입니다. 단일 날짜 삭제도 start와 end를 같은 날짜로 지정해 이 도구를 사용하세요. 여러 일정 또는 "이번 달/12월 휴무 다 삭제" 요청은 반드시 해당 월 전체 시작일과 마지막 날을 start/end로 지정해 한 번만 호출하세요. 단건 delete_my_day_off 도구는 없습니다. vacation_id는 전달하지 마세요. 승인 연차는 유지하고 제외 건수를 안내합니다. 화면 확인 버튼을 누르기 전에는 실제로 삭제되지 않습니다.',
     inputSchema: {
       type: 'object',
       properties: {
-        vacation_id: { type: 'integer', description: '내 휴무 조회 결과의 id' },
-        date: { type: 'string', description: '내 휴무 조회 결과의 날짜 (YYYY-MM-DD)' }
+        start: { type: 'string', description: '삭제 기간 시작일 (YYYY-MM-DD)' },
+        end: { type: 'string', description: '삭제 기간 종료일 (YYYY-MM-DD)' }
       },
-      required: ['vacation_id', 'date'],
+      required: ['start', 'end'],
       additionalProperties: false
     },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false }
@@ -176,6 +195,17 @@ const MCP_TOOLS = [
       type: 'object',
       properties: { query: { type: 'string', minLength: 1, maxLength: 80 } },
       required: ['query'],
+      additionalProperties: false
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false }
+  },
+  {
+    name: 'list_employees',
+    title: '회사 직원 목록 (관리자)',
+    description: '관리자 전용. 재직 중인 회사 직원 목록을 이름, 권한, 직책, 근무지, 업무 연락처로 조회합니다. 로그인 계정·비밀번호 정보는 반환하지 않습니다. "회사원 목록", "직원 전체 명단" 요청에 사용하세요.',
+    inputSchema: {
+      type: 'object',
+      properties: {},
       additionalProperties: false
     },
     annotations: { readOnlyHint: true, destructiveHint: false }
@@ -367,6 +397,76 @@ async function readTeamDaysOff(supabaseAdmin, args) {
   }));
 }
 
+async function suggestMyDaysOff(supabaseAdmin, userId, args) {
+  if (!Number.isInteger(args.year) || args.year < 2000 || args.year > 2100
+    || !Number.isInteger(args.month) || args.month < 1 || args.month > 12
+    || !Number.isInteger(args.count) || args.count < 1 || args.count > 31) {
+    throw new Error('연도, 월 또는 휴무 개수가 올바르지 않습니다.');
+  }
+  const excludeName = requireSearchTerm(args.exclude_name, '제외할 직원 이름');
+  const start = `${args.year}-${String(args.month).padStart(2, '0')}-01`;
+  const endDate = new Date(Date.UTC(args.year, args.month, 0));
+  const end = `${args.year}-${String(args.month).padStart(2, '0')}-${String(endDate.getUTCDate()).padStart(2, '0')}`;
+  const today = koreaDateString();
+  if (end < today) throw new Error('지난 달에는 휴무를 등록할 수 없습니다.');
+
+  const { data: golfEmployees, error: golfEmployeesError } = await supabaseAdmin
+    .from('users')
+    .select('id, name, work_location, status')
+    .ilike('work_location', '%골프장%')
+    .limit(1001);
+  if (golfEmployeesError) throw golfEmployeesError;
+  if ((golfEmployees || []).length > 1000) {
+    throw new Error('골프장 직원 정보가 너무 많아 조건을 확인할 수 없습니다.');
+  }
+  const activeGolfNightEmployees = (golfEmployees || []).filter(employee =>
+    employee.status !== '퇴직' && (employee.work_location || '').includes('야간')
+  );
+  if (!activeGolfNightEmployees.length) {
+    throw new Error('골프장 야간 근무 직원 정보를 찾지 못해 조건을 적용할 수 없습니다.');
+  }
+  const excludedEmployee = await findEmployeeByName(supabaseAdmin, excludeName);
+  const excludedUserIds = new Set([
+    userId,
+    excludedEmployee.id,
+    ...activeGolfNightEmployees.map(employee => employee.id)
+  ]);
+  const { data: vacations, error: vacationsError } = await supabaseAdmin
+    .from('vacations')
+    .select('user_id, date')
+    .in('user_id', [...excludedUserIds])
+    .gte('date', start)
+    .lte('date', end)
+    .limit(2001);
+  if (vacationsError) throw vacationsError;
+  if ((vacations || []).length > 2000) {
+    throw new Error('해당 월 휴무 기록이 너무 많아 후보 날짜를 안전하게 계산할 수 없습니다.');
+  }
+
+  const excludedDates = new Set((vacations || []).map(vacation => vacation.date));
+  const candidates = [];
+  for (let date = new Date(`${start}T00:00:00Z`); date <= endDate; date.setUTCDate(date.getUTCDate() + 1)) {
+    const value = date.toISOString().slice(0, 10);
+    if (value >= today && !excludedDates.has(value)) candidates.push(value);
+  }
+  if (candidates.length < args.count) {
+    throw new Error(`조건에 맞는 날짜가 ${candidates.length}일뿐이라 ${args.count}일을 선택할 수 없습니다.`);
+  }
+
+  for (let index = candidates.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [candidates[index], candidates[swapIndex]] = [candidates[swapIndex], candidates[index]];
+  }
+  const dates = candidates.slice(0, args.count).sort();
+  return {
+    dates,
+    month: start.slice(0, 7),
+    excludedDatesCount: excludedDates.size,
+    golfNightEmployeeCount: activeGolfNightEmployees.length,
+    requestedCount: args.count
+  };
+}
+
 function getInternalRequest(request, pathname, method = 'GET', body) {
   return new Request(new URL(pathname, request.url), {
     method,
@@ -554,6 +654,16 @@ async function searchEmployees(supabaseAdmin, args) {
   return (data || []).filter(employee => employee.status !== '퇴직');
 }
 
+async function listEmployees(supabaseAdmin) {
+  const { data, error } = await supabaseAdmin
+    .from('users')
+    .select('name, role, job_title, work_location, phone, status')
+    .order('name')
+    .limit(200);
+  if (error) throw error;
+  return (data || []).filter(employee => employee.status !== '퇴직');
+}
+
 async function readMyAttendance(supabaseAdmin, userId, args) {
   validateDateRange(args.start, args.end);
   const { data, error } = await supabaseAdmin
@@ -589,6 +699,8 @@ async function callTool(request, supabaseAdmin, env, context, auth, name, args) 
   if (ADMIN_ONLY_TOOLS.has(name)) assertAdmin(auth);
 
   switch (name) {
+    case 'list_employees':
+      return await listEmployees(supabaseAdmin);
     case DAY_OFF_TOOL: {
       const dates = args.dates;
       if (!Array.isArray(dates) || dates.length < 1 || dates.length > 31
@@ -608,8 +720,8 @@ async function callTool(request, supabaseAdmin, env, context, auth, name, args) 
       return { message: `${result.count}일 휴무를 등록했습니다.`, dates };
     }
     case 'update_my_day_off': {
-      const vacationId = Number(args.vacation_id);
-      if (!Number.isSafeInteger(vacationId) || vacationId < 1
+      const vacationId = args.vacation_id;
+      if (typeof vacationId !== 'string' || !UUID_PATTERN.test(vacationId)
         || !isValidDate(args.old_date)
         || !isValidDate(args.date)
         || !['휴무', '시간차', '공가'].includes(args.leave_type)
@@ -643,8 +755,8 @@ async function callTool(request, supabaseAdmin, env, context, auth, name, args) 
       return { message: '본인 휴무를 수정했습니다.', vacation: result.vacation };
     }
     case 'delete_my_day_off': {
-      const vacationId = Number(args.vacation_id);
-      if (!Number.isSafeInteger(vacationId) || vacationId < 1 || !isValidDate(args.date)) {
+      const vacationId = args.vacation_id;
+      if (typeof vacationId !== 'string' || !UUID_PATTERN.test(vacationId) || !isValidDate(args.date)) {
         throw new Error('휴무 ID 또는 날짜가 올바르지 않습니다.');
       }
       const { data: vacation, error: lookupError } = await supabaseAdmin
@@ -665,10 +777,46 @@ async function callTool(request, supabaseAdmin, env, context, auth, name, args) 
       if (!response.ok) throw new Error(result.error || '휴무를 삭제하지 못했습니다.');
       return result;
     }
+    case 'delete_my_days_off': {
+      validateDateRange(args.start, args.end);
+      const { data: vacations, error: lookupError } = await supabaseAdmin
+        .from('vacations')
+        .select('id, date, leave_type')
+        .eq('user_id', auth.user.id)
+        .gte('date', args.start)
+        .lte('date', args.end)
+        .order('date', { ascending: true })
+        .limit(101);
+      if (lookupError) throw lookupError;
+      if ((vacations || []).length > 100) {
+        throw new Error('한 번에 최대 100건까지만 삭제할 수 있습니다. 기간을 나누어 요청해 주세요.');
+      }
+      const deletable = (vacations || []).filter(vacation => vacation.leave_type !== '연차');
+      const annualLeaveCount = (vacations || []).length - deletable.length;
+      let deletedCount = 0;
+      for (const vacation of deletable) {
+        const response = await handleDeleteVacation(
+          getInternalRequest(request, `/api/vacations/${vacation.id}`, 'DELETE'),
+          supabaseAdmin, env, context, vacation.id
+        );
+        const result = await response.json();
+        if (!response.ok) {
+          throw new Error(`${deletedCount}건 삭제 후 중단되었습니다. ${result.error || '휴무를 삭제하지 못했습니다.'}`);
+        }
+        deletedCount += 1;
+      }
+      return {
+        message: `${deletedCount}건의 휴무를 삭제했습니다.${annualLeaveCount ? ` 승인 연차 ${annualLeaveCount}건은 삭제하지 않았습니다.` : ''}`,
+        deletedCount,
+        skippedAnnualLeaveCount: annualLeaveCount
+      };
+    }
     case 'list_my_days_off':
       return await readMyDaysOff(supabaseAdmin, auth.user.id, args);
     case 'list_team_days_off':
       return await readTeamDaysOff(supabaseAdmin, args);
+    case 'suggest_my_days_off':
+      return await suggestMyDaysOff(supabaseAdmin, auth.user.id, args);
     case 'get_my_attendance':
       return await readMyAttendance(supabaseAdmin, auth.user.id, args);
     case 'get_my_annual_leave_balance':
@@ -815,7 +963,7 @@ export async function handleMcpRequest(request, supabaseAdmin, env, context) {
       protocolVersion,
       capabilities: { tools: { listChanged: false } },
       serverInfo: { name: 'jsec-work-assistant', version: '1.0.0' },
-      instructions: '일반 사용자는 본인 휴무·근태·연차를 조회하고 본인 휴무를 관리할 수 있으며, 팀 휴무자 이름·날짜·종류도 조회할 수 있습니다. 관리자는 직원 기본 정보·근태·휴무를 조회하고 직원 휴무를 등록·수정·삭제할 수 있습니다. 관리자 도구는 서버에서 관리자 권한을 검증합니다. 날씨·차량·식단 이미지·지산 연락망 조회도 지원합니다. 모든 변경 작업은 클라이언트 확인 버튼을 통과해야 합니다.'
+      instructions: '요청에 맞는 API는 사용 가능한 도구 중에서 선택합니다. 일반 사용자는 본인 휴무·근태·연차를 조회하고 본인 휴무를 관리할 수 있으며, 팀 휴무자 이름·날짜·종류도 조회할 수 있습니다. 관리자는 회사 직원 목록과 직원 기본 정보·근태·휴무를 조회하고 직원 휴무를 등록·수정·삭제할 수 있습니다. 관리자 도구는 서버에서 관리자 권한을 검증합니다. 날씨·차량·식단 이미지·지산 연락망 조회도 지원합니다. 무작위 휴무 추천은 조건 확인 도구를 호출한 뒤, 등록 요청이 있으면 제안된 날짜로 등록 도구를 호출합니다. 모든 변경 작업은 클라이언트 확인 버튼을 통과해야 합니다.'
     });
   }
   if (message.method === 'ping') return jsonRpcResponse(message.id, {});
