@@ -17,6 +17,62 @@ const KMA_GRID = {
   originY: 136
 };
 
+class KmaApiError extends Error {
+  constructor(message, status) {
+    super(message);
+    this.name = 'KmaApiError';
+    this.status = status;
+  }
+}
+
+function normalizeServiceKey(value) {
+  const serviceKey = String(value || '').trim();
+  if (/%[0-9a-f]{2}/i.test(serviceKey)) {
+    try {
+      return decodeURIComponent(serviceKey);
+    } catch {
+      throw new Error('Worker의 KMA_SERVICE_KEY가 올바르지 않은 URL 인코딩 형식입니다.');
+    }
+  }
+  return serviceKey;
+}
+
+function decodeXmlText(value) {
+  return value
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'");
+}
+
+function getKmaResponseMessage(body) {
+  const jsonMessage = body.match(/"(?:resultMsg|errMsg|returnAuthMsg)"\s*:\s*"([^"]+)"/i)?.[1];
+  const xmlMessage = body.match(/<(?:resultMsg|errMsg|returnAuthMsg)>([\s\S]*?)<\/(?:resultMsg|errMsg|returnAuthMsg)>/i)?.[1];
+  const message = decodeXmlText((jsonMessage || xmlMessage || '').trim())
+    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .slice(0, 240);
+  const code = body.match(/<(?:resultCode|returnReasonCode)>([\s\S]*?)<\/(?:resultCode|returnReasonCode)>/i)?.[1]
+    || body.match(/"(?:resultCode|returnReasonCode)"\s*:\s*"([^"]+)"/i)?.[1]
+    || '';
+
+  if (/SERVICE_KEY_IS_NOT_REGISTERED|SERVICE_ACCESS_DENIED|SERVICE_KEY|인증키|서비스키/i.test(`${code} ${message}`)) {
+    return '기상청 서비스키가 유효하지 않거나 해당 API 사용 승인이 완료되지 않았습니다. data.go.kr의 활용 신청·승인 상태와 Worker KMA_SERVICE_KEY를 확인해 주세요.';
+  }
+  if (/LIMITED_NUMBER_OF_SERVICE_REQUESTS_EXCEEDS|TRAFFIC|트래픽|호출 한도/i.test(`${code} ${message}`)) {
+    return '기상청 API 호출 한도를 초과했습니다. data.go.kr의 일일 트래픽 한도와 활용 신청 상태를 확인해 주세요.';
+  }
+  return message || '기상청 API가 요청을 거부했습니다. 서비스키 승인·유효기간·호출 한도와 요청 정보를 확인해 주세요.';
+}
+
+async function createKmaHttpError(response, endpoint) {
+  const body = (await response.text()).slice(0, 2000);
+  const message = response.status === 401 || response.status === 403
+    ? getKmaResponseMessage(body)
+    : body.replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 240) || response.statusText;
+  return new KmaApiError(`기상청 ${endpoint} HTTP ${response.status}: ${message}`, response.status);
+}
+
 function toKmaGrid(latitude, longitude) {
   const radians = degrees => degrees * Math.PI / 180;
   const earthRadius = KMA_GRID.earthRadiusKm / KMA_GRID.spacingKm;
@@ -144,7 +200,7 @@ async function fetchKmaItems(endpoint, baseTimes, serviceKey, location) {
   for (const base of baseTimes) {
     const url = new URL(`${KMA_BASE_URL}/${endpoint}`);
     url.search = new URLSearchParams({
-      serviceKey,
+      serviceKey: normalizeServiceKey(serviceKey),
       pageNo: '1',
       numOfRows: '1000',
       dataType: 'JSON',
@@ -156,11 +212,21 @@ async function fetchKmaItems(endpoint, baseTimes, serviceKey, location) {
 
     try {
       const response = await fetch(url, { signal: AbortSignal.timeout(6000) });
-      if (!response.ok) throw new Error(`기상청 API HTTP ${response.status}`);
-      const payload = await response.json();
+      if (!response.ok) throw await createKmaHttpError(response, endpoint);
+      const responseBody = await response.text();
+      let payload;
+      try {
+        payload = JSON.parse(responseBody);
+      } catch {
+        throw new Error(`기상청 ${endpoint} 응답이 JSON 형식이 아닙니다.`);
+      }
       const result = payload?.response;
       if (result?.header?.resultCode !== '00') {
-        throw new Error(result?.header?.resultMsg || '기상청에서 날씨 자료를 반환하지 않았습니다.');
+        const message = result?.header?.resultMsg || '기상청에서 날씨 자료를 반환하지 않았습니다.';
+        if (/SERVICE_KEY|SERVICE_ACCESS|인증키|서비스키|LIMITED_NUMBER_OF_SERVICE_REQUESTS/i.test(`${result?.header?.resultCode} ${message}`)) {
+          throw new KmaApiError(`기상청 ${endpoint}: ${message}`, 403);
+        }
+        throw new Error(`기상청 ${endpoint}: ${message}`);
       }
       const items = result?.body?.items?.item;
       if (!Array.isArray(items) || !items.length) {
@@ -168,6 +234,7 @@ async function fetchKmaItems(endpoint, baseTimes, serviceKey, location) {
       }
       return { items, base };
     } catch (error) {
+      if (error instanceof KmaApiError) throw error;
       lastError = error;
     }
   }
