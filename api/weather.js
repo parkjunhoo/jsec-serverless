@@ -299,7 +299,8 @@ async function getWeather(serviceKey, location) {
         temperature: values.get('TMP') ?? values.get('T1H') ?? null,
         condition: condition.text,
         icon: condition.icon,
-        precipitation: values.get('RN1') ?? '강수 없음',
+        precipitation: values.get('PCP') ?? values.get('RN1') ?? '강수 없음',
+        precipitationProbability: values.get('POP') ?? null,
         wind: values.get('WSD') ?? null
       };
     });
@@ -318,6 +319,7 @@ async function getWeather(serviceKey, location) {
       humidity: observedValues.get('REH') ?? null,
       wind: observedValues.get('WSD') ?? null,
       precipitation: observedValues.get('RN1') ?? '강수 없음',
+      precipitationProbability: nearestForecast?.get('POP') ?? null,
       condition: condition.text,
       icon: condition.icon
     },
