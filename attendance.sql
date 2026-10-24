@@ -381,6 +381,7 @@ END;
 $$;
 
 DROP FUNCTION IF EXISTS public.create_manual_attendance_record(uuid, text, uuid, timestamptz, timestamptz, text, text, uuid);
+DROP FUNCTION IF EXISTS public.create_manual_attendance_record(uuid, text, uuid, timestamptz, timestamptz, text, uuid);
 
 CREATE OR REPLACE FUNCTION public.create_manual_attendance_record(
   p_user_id uuid,
@@ -388,8 +389,7 @@ CREATE OR REPLACE FUNCTION public.create_manual_attendance_record(
   p_location_id uuid,
   p_check_in_at timestamptz,
   p_check_out_at timestamptz,
-  p_note text,
-  p_admin_id uuid
+  p_note text
 )
 RETURNS public.attendance_records
 LANGUAGE plpgsql
@@ -464,10 +464,10 @@ REVOKE ALL ON FUNCTION public.delete_attendance_record(uuid, text, uuid)
   FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.delete_attendance_record(uuid, text, uuid) TO service_role;
 REVOKE ALL ON FUNCTION public.create_manual_attendance_record(
-  uuid, text, uuid, timestamptz, timestamptz, text, uuid
+  uuid, text, uuid, timestamptz, timestamptz, text
 ) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.create_manual_attendance_record(
-  uuid, text, uuid, timestamptz, timestamptz, text, uuid
+  uuid, text, uuid, timestamptz, timestamptz, text
 ) TO service_role;
 
 NOTIFY pgrst, 'reload schema';
